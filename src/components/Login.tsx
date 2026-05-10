@@ -55,7 +55,7 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center p-4 selection:bg-indigo-500/30 overflow-hidden">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 selection:bg-indigo-500/30 overflow-hidden">
       {/* Abstract Background */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-500/5 blur-[120px] rounded-full" />
@@ -195,25 +195,41 @@ const Login: React.FC = () => {
             </motion.form>
           </AnimatePresence>
 
-          <div className="mt-8 text-center">
+          <div className="mt-8 text-center text-xs font-bold text-slate-400">
             {isResetting ? (
-              <button 
-                onClick={() => { setIsResetting(false); setError(null); setMsg(null); }}
-                className="text-xs font-bold text-slate-400 hover:text-white transition-colors"
-              >
-                Remember your password? <span className="text-indigo-400 font-black">LOGIN HERE</span>
-              </button>
+              <>
+                Remember your password?{" "}
+                <button 
+                  onClick={() => { setIsResetting(false); setError(null); setMsg(null); }}
+                  className="text-indigo-400 font-black hover:text-indigo-300 transition-colors"
+                >
+                  LOGIN HERE
+                </button>
+              </>
             ) : (
-              <button 
-                onClick={() => setIsRegistering(!isRegistering)}
-                className="text-xs font-bold text-slate-400 hover:text-white transition-colors"
-              >
+              <>
                 {isRegistering ? (
-                  <>Already have an account? <span className="text-indigo-400 font-black">LOGIN HERE</span></>
+                  <>
+                    Already have an account?{" "}
+                    <button 
+                      onClick={() => setIsRegistering(false)}
+                      className="text-indigo-400 font-black hover:text-indigo-300 transition-colors"
+                    >
+                      LOGIN HERE
+                    </button>
+                  </>
                 ) : (
-                  <>Don't have an access key? <span className="text-indigo-400 font-black">REGISTER HERE</span></>
+                  <>
+                    Don't have an access key?{" "}
+                    <button 
+                      onClick={() => setIsRegistering(true)}
+                      className="text-indigo-400 font-black hover:text-indigo-300 transition-colors"
+                    >
+                      REGISTER HERE
+                    </button>
+                  </>
                 )}
-              </button>
+              </>
             )}
           </div>
 
