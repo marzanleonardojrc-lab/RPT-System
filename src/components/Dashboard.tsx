@@ -1,0 +1,193 @@
+import React, { useEffect, useState } from "react";
+import { 
+  collection, 
+  onSnapshot,
+  db,
+  handleFirestoreError,
+  OperationType 
+} from "../lib/firebase";
+import { Delinquency } from "../types";
+import { formatCurrency, cn } from "../lib/utils";
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  Cell
+} from "recharts";
+import { TrendingUp, Users, AlertCircle, CheckCircle2 } from "lucide-react";
+import { motion } from "motion/react";
+
+const Dashboard: React.FC = () => {
+  const [stats, setStats] = useState({
+    totalDelinquent: 0,
+    totalPaid: 0,
+    totalAmountDue: 0,
+    propertyCount: 0
+  });
+  const [chartData, setChartData] = useState<any[]>([]);
+
+  const [rawDelinq, setRawDelinq] = useState<Delinquency[]>([]);
+  const [rawProps, setRawProps] = useState<{ id: string }[]>([]);
+
+  useEffect(() => {
+    const unsubDelinq = onSnapshot(collection(db, "delinquencies"), (snapshot) => {
+      setRawDelinq(snapshot.docs.map(doc => doc.data() as Delinquency));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "delinquencies");
+    });
+
+    const unsubProp = onSnapshot(collection(db, "properties"), (snapshot) => {
+      setRawProps(snapshot.docs.map(doc => ({ id: doc.id })));
+      setStats(prev => ({ ...prev, propertyCount: snapshot.size }));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "properties");
+    });
+
+    return () => {
+      unsubDelinq();
+      unsubProp();
+    };
+  }, []);
+
+  useEffect(() => {
+    const validRecords = rawDelinq.filter(d => rawProps.some(p => p.id === d.propertyId));
+    
+    const computedStats = validRecords.reduce((acc, curr) => {
+      if (curr.status === "Delinquent") {
+        acc.delinquentProps.add(curr.propertyId);
+        acc.totalAmountDue += (Number(curr.totalDue) || 0);
+      } else if (curr.status === "Paid") {
+        acc.totalPaid++;
+      }
+      return acc;
+    }, { delinquentProps: new Set<string>(), totalPaid: 0, totalAmountDue: 0 });
+
+    const yearGroups = validRecords.reduce((acc: any, curr) => {
+      if (curr.status === "Delinquent") {
+        const year = curr.year.toString();
+        acc[year] = (acc[year] || 0) + (Number(curr.totalDue) || 0);
+      }
+      return acc;
+    }, {});
+
+    const newChartData = Object.keys(yearGroups).map(year => ({
+      year,
+      amount: yearGroups[year]
+    })).sort((a, b) => a.year.localeCompare(b.year));
+
+    setStats(prev => ({
+      ...prev,
+      totalDelinquent: computedStats.delinquentProps.size,
+      totalPaid: computedStats.totalPaid,
+      totalAmountDue: computedStats.totalAmountDue
+    }));
+    setChartData(newChartData);
+  }, [rawDelinq, rawProps]);
+
+  const statCards = [
+    { label: "Accounts Delinquent", value: stats.totalDelinquent, icon: AlertCircle, color: "text-red-400", bg: "bg-red-500/5", border: "border-red-500/20" },
+    { label: "Total Recievables", value: formatCurrency(stats.totalAmountDue), icon: TrendingUp, color: "text-indigo-400", bg: "bg-indigo-500/5", border: "border-indigo-500/20" },
+    { label: "Registered Properties", value: stats.propertyCount, icon: Users, color: "text-blue-400", bg: "bg-blue-500/5", border: "border-blue-500/20" },
+    { label: "Paid This Year", value: stats.totalPaid, icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/5", border: "border-emerald-500/20" },
+  ];
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-end justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white tracking-tight">Executive Control</h2>
+          <p className="text-slate-500 text-sm mt-1">Real-time financial status across all property jurisdictions.</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Status Code</p>
+          <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded text-[10px] font-mono text-indigo-400">
+            HEALTH_OPTIMAL_V2
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {statCards.map((card, idx) => (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: idx * 0.1 }}
+            key={card.label}
+            className={cn("p-6 rounded-2xl border bg-slate-900/40 backdrop-blur-sm shadow-xl transition-all hover:translate-y-[-4px]", card.border)}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className={cn("p-2 rounded-lg bg-slate-800 border", card.border)}>
+                <card.icon className={cn("w-5 h-5", card.color)} />
+              </div>
+            </div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{card.label}</p>
+            <p className="text-2xl font-bold text-white tracking-tight">{card.value}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      <motion.div
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl relative overflow-hidden"
+      >
+        <div className="absolute top-0 right-0 p-8 opacity-5">
+           <TrendingUp className="w-32 h-32 text-indigo-500" />
+        </div>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-white tracking-tight">Financial Topology</h3>
+            <p className="text-slate-500 text-sm">Historical delinquency accumulation by taxable year.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-indigo-500"></span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Growth Metric</span>
+          </div>
+        </div>
+        <div className="h-[400px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+              <XAxis 
+                dataKey="year" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 11, fill: '#64748b', fontWeight: 'bold' }}
+                dy={10}
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                tickFormatter={(val) => `₱${val/1000}k`}
+              />
+              <Tooltip 
+                cursor={{ fill: '#ffffff05' }}
+                contentStyle={{ 
+                  backgroundColor: '#0f172a', 
+                  borderRadius: '12px', 
+                  border: '1px solid #1e293b', 
+                  boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.5)',
+                  color: '#f1f5f9'
+                }}
+                itemStyle={{ color: '#818cf8', fontWeight: 'bold' }}
+                formatter={(val: number) => [formatCurrency(val), "Amount Due"]}
+              />
+              <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#6366f1' : '#4f46e5'} fillOpacity={0.8} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+export default Dashboard;

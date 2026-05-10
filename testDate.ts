@@ -1,0 +1,12 @@
+import { differenceInMonths, startOfYear, startOfMonth } from "date-fns";
+const year = 2026;
+const currentDate = new Date();
+const penaltyStartDate = startOfYear(new Date(year, 0, 1));
+const currentMonthStart = startOfMonth(currentDate);
+const totalMonths = Math.max(0, differenceInMonths(currentMonthStart, penaltyStartDate) + 1);
+console.log("year:", year);
+console.log("currentDate:", currentDate);
+console.log("penaltyStartDate:", penaltyStartDate);
+console.log("currentMonthStart:", currentMonthStart);
+console.log("difference:", differenceInMonths(currentMonthStart, penaltyStartDate));
+console.log("totalMonths:", totalMonths);

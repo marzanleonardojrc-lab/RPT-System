@@ -1,0 +1,146 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isApproved() {
+      let email = (request.auth.token.email != null) ? request.auth.token.email.lower() : '';
+      return isSignedIn() && (
+        email == 'marzanleonardojrc@gmail.com' || 
+        email == 'marzan.leonardo04@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().status == 'Approved')
+      );
+    }
+    
+    function hasRole(role) {
+      return isApproved() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().role == role;
+    }
+
+    function isAdmin() { 
+      let email = (request.auth.token.email != null) ? request.auth.token.email.lower() : '';
+      return isSignedIn() && (
+        email == 'marzanleonardojrc@gmail.com' || 
+        email == 'marzan.leonardo04@gmail.com' || 
+        hasRole('Admin')
+      ); 
+    }
+    
+    function isEncoder() { return isAdmin() || hasRole('End-User'); }
+    function isViewer() { return isAdmin() || isApproved(); }
+    
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidUser(data) {
+      return data.uid == request.auth.uid &&
+             data.email == (request.auth.token.email != null ? request.auth.token.email : '') &&
+             data.role in ['Admin', 'End-User'] &&
+             data.status in ['Pending', 'Approved', 'Denied'] &&
+             (resource == null ? data.createdAt == request.time : data.createdAt == existing().createdAt);
+    }
+
+    function isValidProperty(data) {
+      let base = data.pin is string && data.pin.size() > 0 && data.pin.size() <= 64 &&
+                 data.ownerName is string && data.ownerName.size() <= 256 &&
+                 data.assessedValue is number &&
+                 data.barangay is string &&
+                 data.updatedAt == request.time &&
+                 (resource == null ? data.createdAt == request.time : true);
+      
+      let extra = (!('propertyType' in data.keys()) || data.propertyType is string) &&
+                  (!('taxDeclaration' in data.keys()) || data.taxDeclaration is string) &&
+                  (!('imported' in data.keys()) || data.imported is bool) &&
+                  (!('isIdle' in data.keys()) || data.isIdle is bool) &&
+                  (!('isArchived' in data.keys()) || data.isArchived is bool) &&
+                  (!('archivedAt' in data.keys()) || data.archivedAt == null || data.archivedAt is string);
+                 
+      return base && extra;
+    }
+
+    function isValidDelinquency(data) {
+      let base = data.propertyId is string &&
+                 data.year is number &&
+                 data.basicTaxDue is number &&
+                 data.sefTaxDue is number &&
+                 (!('idleSurcharge' in data.keys()) || data.idleSurcharge is number) &&
+                 data.penalty is number &&
+                 data.interest is number &&
+                 data.totalDue is number &&
+                 data.status in ['Delinquent', 'Paid', 'Voided', 'Pending'] &&
+                 (resource == null ? data.createdBy == request.auth.uid : data.get('createdBy', null) == existing().get('createdBy', null)) &&
+                 data.updatedAt == request.time &&
+                 (resource == null ? data.createdAt == request.time : true) &&
+                 // Ensure property exists on creation
+                 (resource == null ? exists(/databases/$(database)/documents/properties/$(data.propertyId)) : true);
+      
+      let paymentCheck = (!('paymentDetails' in data.keys())) || data.paymentDetails == null ||
+                         (data.paymentDetails is map && data.paymentDetails.orNumber is string);
+
+      let pendingCheck = (!('pendingUpdate' in data.keys())) || data.pendingUpdate == null || (data.pendingUpdate is map);
+      let voidCheck = (!('voidMetadata' in data.keys())) || data.voidMetadata == null || (data.voidMetadata is map);
+          
+      return base && paymentCheck && pendingCheck && voidCheck;
+    }
+
+    function isValidAuditLog(data) {
+      return data.userId == request.auth.uid &&
+             data.timestamp == request.time &&
+             data.action is string &&
+             data.entityType is string;
+    }
+
+    // --- Collections ---
+
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && userId == request.auth.uid && isValidUser(incoming());
+      allow update: if isAdmin() || (userId == request.auth.uid && incoming().role == existing().role); // Can't self-promote
+      allow delete: if isAdmin();
+    }
+
+    match /properties/{propertyId} {
+      allow read: if isViewer();
+      allow create: if isEncoder() && isValidProperty(incoming()) && isValidId(propertyId);
+      allow update: if isEncoder() && isValidProperty(incoming()) && 
+                    incoming().pin == existing().pin; // Immutable PIN
+      allow delete: if isAdmin();
+    }
+
+    match /delinquencies/{delinqId} {
+      allow read: if isViewer();
+      allow create: if isEncoder() && isValidDelinquency(incoming()) && isValidId(delinqId);
+      allow update: if isEncoder() && isValidDelinquency(incoming()) &&
+                    (
+                      // Allow updating most fields directly as an encoder
+                      incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'year', 'basicTaxDue', 'sefTaxDue', 'idleSurcharge', 'penalty', 'interest', 'totalDue', 'paymentDetails', 'voidMetadata', 'pendingUpdate'])
+                    );
+      allow delete: if isAdmin();
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && isValidAuditLog(incoming());
+      // No updates or deletes allowed
+    }
+
+    match /user_mappings/{mappingId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin() || (isSignedIn() && resource != null && existing().email == (request.auth.token.email != null ? request.auth.token.email : ''));
+    }
+  }
+}

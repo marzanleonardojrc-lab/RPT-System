@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and roles for access control.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "encoder", "viewer"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Property": {
+      "title": "Property Record",
+      "description": "Information about a specific real property.",
+      "type": "object",
+      "properties": {
+        "pin": { "type": "string", "description": "Property Identification Number" },
+        "ownerName": { "type": "string" },
+        "assessedValue": { "type": "number" },
+        "barangay": { "type": "string" },
+        "propertyType": { "type": "string", "enum": ["Residential", "Commercial", "Industrial", "Agricultural", "Special"] },
+        "taxDeclaration": { "type": "string" },
+        "isArchived": { "type": "boolean" },
+        "archivedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pin", "ownerName", "assessedValue", "barangay"]
+    },
+    "Delinquency": {
+      "title": "Delinquency Record",
+      "description": "Tax delinquency information for a property in a specific year.",
+      "type": "object",
+      "properties": {
+        "propertyId": { "type": "string" },
+        "year": { "type": "integer" },
+        "basicTaxDue": { "type": "number" },
+        "sefTaxDue": { "type": "number" },
+        "penalty": { "type": "number" },
+        "interest": { "type": "number" },
+        "totalDue": { "type": "number" },
+        "status": { "type": "string", "enum": ["Delinquent", "Paid", "Voided"] },
+        "paymentDetails": {
+          "type": "object",
+          "properties": {
+            "orNumber": { "type": "string" },
+            "paymentDate": { "type": "string" },
+            "payerName": { "type": "string" },
+            "paymentType": { "type": "string", "enum": ["Full", "Partial", "Installment"] },
+            "amountPaid": { "type": "number" },
+            "recordedBy": { "type": "string" },
+            "recordedAt": { "type": "string" }
+          }
+        },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["propertyId", "year", "basicTaxDue", "status"]
+    },
+    "AuditLog": {
+      "title": "Audit log",
+      "description": "Immutable log of changes made to records.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "action": { "type": "string", "enum": ["CREATE", "UPDATE", "VOID", "LOGIN", "EXPORT"] },
+        "entityId": { "type": "string" },
+        "entityType": { "type": "string" },
+        "oldValue": { "type": "object" },
+        "newValue": { "type": "object" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "User profiles and roles."
+    },
+    "properties": {
+      "schema": "Property",
+      "description": "Registry of real properties."
+    },
+    "delinquencies": {
+      "schema": "Delinquency",
+      "description": "Tax delinquency status per property/year."
+    },
+    "audit_logs": {
+      "schema": "AuditLog",
+      "description": "Audit trail for system activity."
+    }
+  }
+}
