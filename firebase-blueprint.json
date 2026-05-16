@@ -15,21 +15,38 @@
     },
     "Property": {
       "title": "Property Record",
-      "description": "Information about a specific real property.",
+      "description": "Comprehensive information about a real property including ownership, technical description and valuation.",
       "type": "object",
       "properties": {
-        "pin": { "type": "string", "description": "Property Identification Number" },
+        "pin": { "type": "string" },
         "ownerName": { "type": "string" },
-        "assessedValue": { "type": "number" },
+        "ownerAddress": { "type": "string" },
+        "administratorName": { "type": "string" },
+        "administratorAddress": { "type": "string" },
+        "effectivityDate": { "type": "string" },
+        "tdNumber": { "type": "string" },
+        "detailedLocation": { "type": "string" },
+        "street": { "type": "string" },
         "barangay": { "type": "string" },
-        "propertyType": { "type": "string", "enum": ["Residential", "Commercial", "Industrial", "Agricultural", "Special"] },
-        "taxDeclaration": { "type": "string" },
+        "municipality": { "type": "string" },
+        "province": { "type": "string" },
+        "lotNo": { "type": "string" },
+        "blkNo": { "type": "string" },
+        "octTct": { "type": "string" },
+        "cctCloa": { "type": "string" },
+        "classification": { "type": "string", "enum": ["LAND", "BUILDING", "MACHINERY"] },
+        "area": { "type": "string" },
+        "assessedValue": { "type": "number" },
+        "previousTdNo": { "type": "string" },
+        "previousOwner": { "type": "string" },
+        "previousAssessedValue": { "type": "number" },
+        "recordedBy": { "type": "string" },
         "isArchived": { "type": "boolean" },
-        "archivedAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "archivedAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "createdAt": { "type": "string" }
       },
-      "required": ["pin", "ownerName", "assessedValue", "barangay"]
+      "required": ["pin", "ownerName", "barangay", "classification", "assessedValue"]
     },
     "Delinquency": {
       "title": "Delinquency Record",
@@ -76,6 +93,40 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "action", "timestamp"]
+    },
+    "Payment": {
+      "title": "Payment Record",
+      "description": "Immutable record of a payment transaction.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "delinquencyId": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "taxYear": { "type": "integer" },
+        "assessedValue": { "type": "number" },
+        "orNumber": { "type": "string" },
+        "paymentDate": { "type": "string", "format": "date" },
+        "payerName": { "type": "string" },
+        "paymentType": { "type": "string", "enum": ["Full", "Partial", "Installment"] },
+        "amountPaid": { "type": "number" },
+        "basicPaid": { "type": "number" },
+        "sefPaid": { "type": "number" },
+        "penaltyPaid": { "type": "number" },
+        "recordedBy": { "type": "string" },
+        "approvedBy": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Voided"] },
+        "voidMetadata": {
+          "type": "object",
+          "properties": {
+            "reason": { "type": "string" },
+            "encoder": { "type": "string" },
+            "approver": { "type": "string" },
+            "voidedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "recordedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["delinquencyId", "propertyId", "orNumber", "amountPaid", "status", "recordedAt"]
     }
   },
   "firestore": {
@@ -90,6 +141,10 @@
     "delinquencies": {
       "schema": "Delinquency",
       "description": "Tax delinquency status per property/year."
+    },
+    "payments": {
+      "schema": "Payment",
+      "description": "Immutable ledger of tax payments."
     },
     "audit_logs": {
       "schema": "AuditLog",

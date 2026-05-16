@@ -1,5 +1,6 @@
 import express, { type Response, type NextFunction } from "express";
 import admin from "firebase-admin";
+import { getFirestore } from "firebase-admin/firestore";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -27,21 +28,10 @@ if (admin.apps.length === 0) {
   });
 }
 
-// Get Firestore instance. Fallback to default if named fails or is empty.
-let db: admin.firestore.Firestore;
-try {
-  const dbId = firebaseConfig.firestoreDatabaseId;
-  if (dbId && dbId !== "(default)") {
-    db = admin.firestore(dbId);
-    console.log(`Using Firestore Database ID: ${dbId}`);
-  } else {
-    db = admin.firestore();
-    console.log("Using Default Firestore Database");
-  }
-} catch (err) {
-  console.error("Failed to initialize named Firestore, falling back to default:", err);
-  db = admin.firestore();
-}
+// Get Firestore instance.
+const dbId = firebaseConfig.firestoreDatabaseId;
+const db = (dbId && dbId !== "(default)") ? getFirestore(dbId) : getFirestore();
+console.log(`Using Firestore Database ${dbId && dbId !== "(default)" ? `ID: ${dbId}` : "Default"}`);
 
 async function initDb() {
   try {
@@ -193,12 +183,23 @@ async function startServer() {
   });
 
   app.post("/api/properties", authenticateToken, async (req, res) => {
-    const { pin, ownerName, assessedValue, barangay, propertyType, taxDeclaration } = req.body;
+    const { 
+      pin, ownerName, ownerAddress, administratorName, administratorAddress, 
+      effectivityDate, tdNumber, detailedLocation, street, barangay, 
+      municipality, province, lotNo, blkNo, octTct, cctCloa, 
+      classification, area, assessedValue, previousTdNo, previousOwner, 
+      previousAssessedValue, recordedBy 
+    } = req.body;
     const id = Math.random().toString(36).substring(2, 15);
     const now = new Date().toISOString();
     try {
       await db.collection("properties").doc(id).set({
-        id, pin, ownerName, assessedValue, barangay, propertyType, taxDeclaration, updatedAt: now, createdAt: now
+        id, pin, ownerName, ownerAddress, administratorName, administratorAddress, 
+        effectivityDate, tdNumber, detailedLocation, street, barangay, 
+        municipality, province, lotNo, blkNo, octTct, cctCloa, 
+        classification, area, assessedValue, previousTdNo, previousOwner, 
+        previousAssessedValue, recordedBy, 
+        updatedAt: now, createdAt: now
       });
       res.json({ id });
     } catch (err: any) {

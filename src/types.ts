@@ -11,17 +11,42 @@ export interface UserProfile {
   createdAt: string;
 }
 
-export type PropertyType = "Residential" | "Commercial" | "Industrial" | "Agricultural" | "Special";
+export type PropertyClassification = "LAND" | "BUILDING" | "MACHINERY";
 
 export interface Property {
   id: string;
   pin: string;
+  // I. RECORD OF OWNERSHIP
   ownerName: string;
-  assessedValue: number;
+  ownerAddress: string;
+  administratorName: string;
+  administratorAddress: string;
+  effectivityDate: string; // Date of Transfer
+  tdNumber: string; // Tax Declaration Number
+
+  // II. TECHNICAL PROPERTY DESCRIPTION
+  detailedLocation: string;
+  street: string;
   barangay: string;
-  propertyType: PropertyType;
-  taxDeclaration?: string;
-  isIdle?: boolean;
+  municipality: string;
+  province: string;
+  lotNo: string;
+  blkNo: string;
+  octTct: string;
+  cctCloa: string;
+
+  // III. KIND OF PROPERTY ASSESSED
+  classification: PropertyClassification;
+  area: string;
+  assessedValue: number;
+
+  // IV. REMARKS
+  previousTdNo: string;
+  previousOwner: string;
+  previousAssessedValue: number;
+  recordedBy: string;
+
+  // Status/Meta
   isArchived?: boolean;
   archivedAt?: string;
   updatedAt: string;
@@ -30,13 +55,33 @@ export interface Property {
 
 export type DelinquencyStatus = "Pending" | "Delinquent" | "Paid" | "Voided";
 
-export interface PaymentDetails {
+export type PaymentDetails = Omit<Payment, 'id' | 'delinquencyId' | 'propertyId' | 'status' | 'voidMetadata'>;
+
+export interface Payment {
+  id: string;
+  delinquencyId: string;
+  propertyId: string;
+  taxYear: number;
+  assessedValue: number;
   orNumber: string;
   paymentDate: string;
   payerName: string;
   paymentType: "Full" | "Partial" | "Installment";
   amountPaid: number;
-  recordedBy: string;
+  basicPaid: number;
+  sefPaid: number;
+  penaltyPaid: number;
+  recordedBy: string; // Encoder
+  approvedBy: string; // Approver
+  treasurer?: string;
+  deputy?: string;
+  status: "Active" | "Voided";
+  voidMetadata?: {
+    reason: string;
+    encoder: string;
+    approver: string;
+    voidedAt: string;
+  };
   recordedAt: string;
 }
 
@@ -46,11 +91,13 @@ export interface Delinquency {
   year: number;
   basicTaxDue: number;
   sefTaxDue: number;
-  penalty: number;
+  penalty: number; // Current calculated penalty
   interest: number;
   totalDue: number;
   status: DelinquencyStatus;
-  paymentDetails?: PaymentDetails;
+  totalPaid: number;
+  paymentDetails?: PaymentDetails; // Kept for legacy/last payment info
+  payments?: Payment[]; // Optional populated payments
   pendingUpdate?: {
     basicTaxDue: number;
     sefTaxDue: number;

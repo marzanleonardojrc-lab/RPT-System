@@ -9,31 +9,31 @@ import {
   serverTimestamp,
   db,
   handleFirestoreError,
-  OperationType,
-  auth
+  OperationType 
 } from "../lib/firebase";
+import { useAuth } from "../AuthContext";
 import { Delinquency, Property, DelinquencyStatus, PaymentDetails } from "../types";
-import { calculateTotalDue, BASIC_TAX_RATE, SEF_TAX_RATE, IDLE_LAND_RATE } from "../lib/taxCalculations";
+import { calculateTotalDue, calculatePenalties, groupDelinquenciesByPenaltyRule, GroupedDelinquency, BASIC_TAX_RATE, SEF_TAX_RATE, IDLE_LAND_RATE } from "../lib/taxCalculations";
 import { cn, formatCurrency } from "../lib/utils";
-import { Plus, Search, Filter, CreditCard, AlertCircle, CheckCircle2, Receipt, X, Clock, XCircle, Info } from "lucide-react";
+import { Plus, Search, Filter, CreditCard, AlertCircle, CheckCircle2, Receipt, X, Clock, XCircle, Info, ArrowUp } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { logAudit } from "../lib/audit";
 import ConfirmDialog from "./ConfirmDialog";
+import DelinquencyActions from "./DelinquencyActions";
 
 const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ isEncoder, isAdmin }) => {
+  const { profile } = useAuth();
   const [delinquencies, setDelinquencies] = useState<Delinquency[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [activeDelinquency, setActiveDelinquency] = useState<Delinquency | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [expandedPropId, setExpandedPropId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [selectedPropId, setSelectedPropId] = useState("");
   const [propertySearch, setPropertySearch] = useState("");
   const [propertySearchResults, setPropertySearchResults] = useState<Property[]>([]);
   const [focusedSearchIndex, setFocusedSearchIndex] = useState(-1);
-  const [year, setYear] = useState(new Date().getFullYear() - 1);
-  const [basicTax, setBasicTax] = useState(0);
-  const [sefTax, setSefTax] = useState(0);
-  const [idleTax, setIdleTax] = useState(0);
 
   // Dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -55,7 +55,7 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
       return;
     }
     const filtered = properties.filter(p => 
-      p.pin.toLowerCase().includes(propertySearch.toLowerCase()) ||
+      p.tdNumber.toLowerCase().includes(propertySearch.toLowerCase()) ||
       p.ownerName.toLowerCase().includes(propertySearch.toLowerCase())
     ).slice(0, 5); // Limit to top 5 results for clarity
     setPropertySearchResults(filtered);
@@ -77,80 +77,114 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
     return () => { unsubDelinq(); unsubProp(); };
   }, []);
 
-  useEffect(() => {
-    if (selectedPropId) {
-      const prop = properties.find(p => p.id === selectedPropId);
-      if (prop) {
-        // Automatically set rates based on R.A. 7160
-        const calculatedBasic = prop.assessedValue * BASIC_TAX_RATE;
-        const calculatedSef = prop.assessedValue * SEF_TAX_RATE;
-        const calculatedIdle = prop.isIdle ? (prop.assessedValue * IDLE_LAND_RATE) : 0;
-        
-        setBasicTax(calculatedBasic);
-        setSefTax(calculatedSef);
-        setIdleTax(calculatedIdle);
+  const [entryRows, setEntryRows] = useState<{ id: string; startYear: number; endYear: number; assessedValue: number }[]>([
+    { id: Math.random().toString(36).substr(2, 9), startYear: new Date().getFullYear() - 1, endYear: new Date().getFullYear() - 1, assessedValue: 0 }
+  ]);
+
+  const addEntryRow = () => {
+    const lastRow = entryRows[entryRows.length - 1];
+    setEntryRows([
+      ...entryRows,
+      { 
+        id: Math.random().toString(36).substr(2, 9), 
+        startYear: lastRow ? lastRow.endYear + 1 : new Date().getFullYear() - 1,
+        endYear: lastRow ? lastRow.endYear + 1 : new Date().getFullYear() - 1,
+        assessedValue: lastRow?.assessedValue || 0
       }
-    } else {
-      setBasicTax(0);
-      setSefTax(0);
-      setIdleTax(0);
+    ]);
+  };
+
+  const removeEntryRow = (id: string) => {
+    if (entryRows.length > 1) {
+      setEntryRows(entryRows.filter(r => r.id !== id));
     }
-  }, [selectedPropId, properties]);
+  };
+
+  const updateEntryRow = (id: string, updates: any) => {
+    setEntryRows(entryRows.map(r => r.id === id ? { ...r, ...updates } : r));
+  };
+
+  const calculateRowStats = (row: typeof entryRows[0]) => {
+    const span = Math.max(1, (row.endYear - row.startYear) + 1);
+    const aggregateAssessed = row.assessedValue * span;
+    const basicTax = aggregateAssessed * BASIC_TAX_RATE;
+    const sefTax = aggregateAssessed * SEF_TAX_RATE;
+    
+    // Penalties are calculated per year and summed
+    let totalPenalty = 0;
+    for (let y = row.startYear; y <= row.endYear; y++) {
+      const yearBasic = row.assessedValue * BASIC_TAX_RATE;
+      const yearSef = row.assessedValue * SEF_TAX_RATE;
+      const yearPenalties = calculatePenalties(yearBasic + yearSef, y, new Date());
+      totalPenalty += yearPenalties.interestAmount;
+    }
+
+    const totalDue = basicTax + sefTax + totalPenalty;
+
+    return {
+      span,
+      aggregateAssessed,
+      basicTax,
+      sefTax,
+      totalPenalty,
+      totalDue
+    };
+  };
 
   const handleCreate = async () => {
-    const calc = calculateTotalDue(basicTax, sefTax, year, new Date(), idleTax);
-
     try {
-      // Check for existing "Delinquent" record for same property
-      const existing = delinquencies.find(d => 
-        d.propertyId === selectedPropId && 
-        (d.status === "Delinquent" || d.status === "Pending")
-      );
+      for (const row of entryRows) {
+        // We iterate through each year in the span and create/update records
+        for (let y = row.startYear; y <= row.endYear; y++) {
+          const yearBasic = row.assessedValue * BASIC_TAX_RATE;
+          const yearSef = row.assessedValue * SEF_TAX_RATE;
+          const calc = calculateTotalDue(yearBasic, yearSef, y, new Date(), 0);
 
-      const status: DelinquencyStatus = "Delinquent";
+          const existing = delinquencies.find(d => 
+            d.propertyId === selectedPropId && 
+            d.year === y &&
+            (d.status === "Delinquent" || d.status === "Pending")
+          );
 
-      if (existing) {
-        // Update existing record
-        const ref = doc(db, "delinquencies", existing.id);
-        const updateData = {
-          year,
-          basicTaxDue: basicTax,
-          sefTaxDue: sefTax,
-          idleSurcharge: idleTax,
-          penalty: calc.interest,
-          interest: calc.interest,
-          totalDue: calc.totalDue,
-          status: status,
-          updatedAt: serverTimestamp()
-        };
-        await updateDoc(ref, updateData);
-        await logAudit("UPDATE", "Delinquency", existing.id, existing, updateData);
-      } else {
-        // Create new record
-        const docRef = await addDoc(collection(db, "delinquencies"), {
-          propertyId: selectedPropId,
-          year,
-          basicTaxDue: basicTax,
-          sefTaxDue: sefTax,
-          idleSurcharge: idleTax,
-          penalty: calc.interest,
-          interest: calc.interest,
-          totalDue: calc.totalDue,
-          status: status,
-          createdBy: auth.currentUser?.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-        await logAudit("CREATE", "Delinquency", docRef.id, null, { propertyId: selectedPropId, year, totalDue: calc.totalDue });
+          const status: DelinquencyStatus = "Delinquent";
+
+          if (existing) {
+            const ref = doc(db, "delinquencies", existing.id);
+            const updateData = {
+              basicTaxDue: yearBasic,
+              sefTaxDue: yearSef,
+              penalty: calc.interest,
+              interest: calc.interest,
+              totalDue: calc.totalDue,
+              status: status,
+              updatedAt: serverTimestamp()
+            };
+            await updateDoc(ref, updateData);
+            await logAudit("UPDATE", "Delinquency", existing.id, existing, updateData);
+          } else {
+            const docRef = await addDoc(collection(db, "delinquencies"), {
+              propertyId: selectedPropId,
+              year: y,
+              basicTaxDue: yearBasic,
+              sefTaxDue: yearSef,
+              idleSurcharge: 0,
+              penalty: calc.interest,
+              interest: calc.interest,
+              totalDue: calc.totalDue,
+              status: status,
+              recordedBy: profile?.username || profile?.displayName || "System",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            });
+            await logAudit("CREATE", "Delinquency", docRef.id, null, { propertyId: selectedPropId, year: y, totalDue: calc.totalDue });
+          }
+        }
       }
       
       setIsAdding(false);
       setSelectedPropId("");
       setPropertySearch("");
-      setPropertySearchResults([]);
-      setBasicTax(0);
-      setSefTax(0);
-      setIdleTax(0);
+      setEntryRows([{ id: Math.random().toString(36).substr(2, 9), startYear: new Date().getFullYear() - 1, endYear: new Date().getFullYear() - 1, assessedValue: 0 }]);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, "delinquencies");
     }
@@ -158,40 +192,81 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
 
   const preSubmitCheck = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPropId || !year || !basicTax) return;
+    if (!selectedPropId || entryRows.some(r => r.assessedValue <= 0)) return;
 
     const prop = properties.find(p => p.id === selectedPropId);
-    const existing = delinquencies.find(d => 
-      d.propertyId === selectedPropId && 
-      (d.status === "Delinquent" || d.status === "Pending")
-    );
-
+    
     setConfirmDialog({
       isOpen: true,
-      title: existing ? "Modify Existing Record?" : "Issue New Delinquency?",
-      message: existing 
-        ? `A record already exists for ${prop?.ownerName}. \n\nThe previous amount will be DISCARDED and replaced with this new computation for FY${year}. This will be posted immediately. Do you wish to continue?`
-        : `You are about to issue a formal delinquency record for ${prop?.ownerName} for taxable year ${year}. \n\nThis will be posted immediately.`,
-      type: existing ? "danger" : "warning",
+      title: "Issue Batch Delinquencies?",
+      message: `You are about to issue delinquency records for ${prop?.ownerName}. \n\nExisting records for the specified years will be updated. Do you wish to continue?`,
+      type: "warning",
       onConfirm: handleCreate
     });
   };
 
-  const filtered = delinquencies.filter(d => {
-    const prop = properties.find(p => p.id === d.propertyId);
-    if (!prop || prop.isArchived) return false;
-    const searchStr = `${prop.ownerName} ${prop.pin} ${d.year}`.toLowerCase();
-    const searchMatch = searchStr.includes(searchTerm.toLowerCase());
-    
-    const isEffectivelyPaid = d.status === "Paid" && d.paymentDetails?.orNumber;
-    const statusToDisplay = (d.status === "Paid" && !isEffectivelyPaid) ? "Delinquent" : d.status;
+  const groupedDelinquencies = React.useMemo(() => {
+    const groups: Record<string, { 
+      property: Property; 
+      delinquencies: Delinquency[];
+      totalPrincipal: number;
+      totalInterest: number;
+      totalDue: number;
+      minYear: number;
+      maxYear: number;
+    }> = {};
 
-    if (statusFilter !== "All" && statusToDisplay !== statusFilter) {
-      return false;
-    }
-    
-    return searchMatch;
-  });
+    delinquencies.forEach(d => {
+      const prop = properties.find(p => p.id === d.propertyId);
+      if (!prop || prop.isArchived) return;
+
+      const isEffectivelyPaid = d.status === "Paid" && d.paymentDetails?.orNumber;
+      const statusToDisplay = (d.status === "Paid" && !isEffectivelyPaid) ? "Delinquent" : d.status;
+
+      // Search matching
+      const searchStr = `${prop.ownerName} ${prop.tdNumber} ${d.year}`.toLowerCase();
+      const matchesSearch = searchStr.includes(searchTerm.toLowerCase());
+
+      // Status filtering matching
+      let matchesStatus = true;
+      if (statusFilter !== "All") {
+        matchesStatus = statusToDisplay === statusFilter;
+      } else {
+        matchesStatus = statusToDisplay !== "Paid";
+      }
+
+      if (!matchesSearch || !matchesStatus) return;
+
+      if (!groups[d.propertyId]) {
+        groups[d.propertyId] = {
+          property: prop,
+          delinquencies: [],
+          totalPrincipal: 0,
+          totalInterest: 0,
+          totalDue: 0,
+          minYear: Infinity,
+          maxYear: -Infinity
+        };
+      }
+
+      const group = groups[d.propertyId];
+      const currentCalc = calculateTotalDue(d.basicTaxDue, d.sefTaxDue, d.year, new Date(), (d as any).idleSurcharge || 0);
+
+      group.delinquencies.push({ ...d });
+      group.totalPrincipal += (d.basicTaxDue + d.sefTaxDue + ((d as any).idleSurcharge || 0));
+      group.totalInterest += currentCalc.interest;
+      group.totalDue += currentCalc.totalDue;
+      group.minYear = Math.min(group.minYear, d.year);
+      group.maxYear = Math.max(group.maxYear, d.year);
+    });
+
+    // Sort delinquencies within groups by year desc
+    Object.values(groups).forEach(g => {
+      g.delinquencies.sort((a, b) => b.year - a.year);
+    });
+
+    return Object.values(groups).sort((a, b) => a.property.ownerName.localeCompare(b.property.ownerName));
+  }, [delinquencies, properties, searchTerm, statusFilter]);
 
   return (
     <div className="space-y-6">
@@ -219,36 +294,267 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
         )}
       </div>
 
+      <AnimatePresence mode="popLayout">
+        {isAdding && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-red-500/10 rounded-xl">
+                    <AlertCircle className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white tracking-tight uppercase">Initialize Issuance Registry</h3>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Identify property and define delinquent periods.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsAdding(false);
+                    setSelectedPropId("");
+                    setPropertySearch("");
+                  }}
+                  className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-8 max-h-[80vh] overflow-y-auto">
+                {/* Search Header */}
+                <div className="bg-slate-950/50 p-6 rounded-2xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6">
+                  <div className="w-full md:flex-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Search Property</label>
+                    {selectedPropId ? (
+                      <div className="flex items-center justify-between p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-xl">
+                        <div className="truncate">
+                          <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-0.5">TD: {properties.find(p => p.id === selectedPropId)?.tdNumber}</p>
+                          <p className="text-sm text-white font-bold truncate">{properties.find(p => p.id === selectedPropId)?.ownerName}</p>
+                        </div>
+                        <button type="button" onClick={() => setSelectedPropId("")} className="px-4 py-2 hover:bg-red-500/10 text-red-400 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-colors border border-red-500/20">
+                          Change
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                        <input 
+                          type="text"
+                          placeholder="Ex: 000-000-000-000 or Owner Name..."
+                          className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                          value={propertySearch}
+                          onChange={e => setPropertySearch(e.target.value)}
+                        />
+                        {propertySearchResults.length > 0 && (
+                          <div className="absolute z-50 w-full mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden py-1">
+                            {propertySearchResults.map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedPropId(p.id);
+                                  setPropertySearch("");
+                                  setPropertySearchResults([]);
+                                  
+                                  // Automatically find earliest unpaid year
+                                  const propDelinquencies = delinquencies.filter(d => d.propertyId === p.id);
+                                  const unpaidYears = propDelinquencies
+                                    .filter(d => d.status !== "Paid" && d.status !== "Voided")
+                                    .map(d => d.year);
+                                  
+                                  let earliestYear = new Date().getFullYear() - 1;
+
+                                  if (unpaidYears.length > 0) {
+                                    earliestYear = Math.min(...unpaidYears);
+                                  } else if (p.effectivityDate) {
+                                    const effYear = new Date(p.effectivityDate).getFullYear();
+                                    if (!isNaN(effYear) && effYear < new Date().getFullYear()) {
+                                      earliestYear = effYear;
+                                    }
+                                  }
+
+                                  setEntryRows([{ 
+                                    id: Math.random().toString(36).substr(2, 9), 
+                                    startYear: earliestYear, 
+                                    endYear: new Date().getFullYear() - 1, 
+                                    assessedValue: p.assessedValue 
+                                  }]);
+                                }}
+                                className="w-full p-4 text-left hover:bg-indigo-500/10 transition-colors border-b border-slate-800 last:border-0"
+                              >
+                                <p className="text-xs font-bold text-white uppercase">{p.tdNumber}</p>
+                                <p className="text-[10px] text-slate-500 truncate">{p.ownerName}</p>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {selectedPropId && (
+                    <div className="w-full md:w-64 p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+                      <p className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-widest mb-1">Declared Value</p>
+                      <p className="text-xl font-black text-emerald-400">{formatCurrency(properties.find(p => p.id === selectedPropId)?.assessedValue || 0)}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Delinquent Years & Assessments</h4>
+                    <button 
+                      onClick={addEntryRow}
+                      className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold text-indigo-400 hover:text-white bg-indigo-500/10 hover:bg-indigo-500 rounded-lg transition-all border border-indigo-500/20"
+                    >
+                      <Plus className="w-3 h-3" />
+                      ADD NEW PERIOD
+                    </button>
+                  </div>
+
+                  <div className="overflow-hidden border border-slate-800 rounded-2xl bg-slate-950/20">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-slate-950/50 border-b border-slate-800">
+                          <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[9px]">Start Year</th>
+                          <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[9px]">End Year</th>
+                          <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[9px]">Assessed Value</th>
+                          <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[9px] text-center">Span</th>
+                          <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[9px]">Basic (1%)</th>
+                          <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[9px]">SEF (1%)</th>
+                          <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[9px]">Penalty</th>
+                          <th className="px-6 py-4 font-bold text-indigo-400 uppercase tracking-widest text-[9px]">Total Due</th>
+                          <th className="px-6 py-4"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {entryRows.map((row) => {
+                          const stats = calculateRowStats(row);
+                          return (
+                            <tr key={row.id} className="hover:bg-white/[0.01] transition-colors">
+                              <td className="px-6 py-4">
+                                <input 
+                                  type="number" 
+                                  className="w-20 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-center focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                  value={row.startYear}
+                                  onChange={e => updateEntryRow(row.id, { startYear: parseInt(e.target.value) || new Date().getFullYear() })}
+                                />
+                              </td>
+                              <td className="px-6 py-4">
+                                <input 
+                                  type="number" 
+                                  className="w-20 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-center focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                  value={row.endYear}
+                                  onChange={e => updateEntryRow(row.id, { endYear: parseInt(e.target.value) || new Date().getFullYear() })}
+                                />
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 font-bold">₱</span>
+                                  <input 
+                                    type="number" 
+                                    className="w-32 bg-slate-950 border border-slate-800 rounded-xl pl-6 pr-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-emerald-400 transition-all"
+                                    value={row.assessedValue || ""}
+                                    onChange={e => updateEntryRow(row.id, { assessedValue: parseFloat(e.target.value) || 0 })}
+                                  />
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded text-[10px] font-black">{stats.span}Y</span>
+                              </td>
+                              <td className="px-6 py-4 text-slate-400 font-medium">{formatCurrency(stats.basicTax)}</td>
+                              <td className="px-6 py-4 text-slate-400 font-medium">{formatCurrency(stats.sefTax)}</td>
+                              <td className="px-6 py-4 text-red-500 font-bold">+{formatCurrency(stats.totalPenalty)}</td>
+                              <td className="px-6 py-4 text-white font-black text-sm">{formatCurrency(stats.totalDue)}</td>
+                              <td className="px-6 py-4 text-right">
+                                {entryRows.length > 1 && (
+                                  <button onClick={() => removeEntryRow(row.id)} className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all">
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-8 bg-slate-950/50 border-t border-slate-800 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mb-1">AGGREGATE COLLECTION TOTAL</p>
+                  <p className="text-3xl font-black text-white tracking-tight">
+                    {formatCurrency(entryRows.reduce((acc, r) => acc + calculateRowStats(r).totalDue, 0))}
+                  </p>
+                </div>
+                <div className="flex gap-4">
+                  <button 
+                    onClick={() => {
+                      setIsAdding(false);
+                      setSelectedPropId("");
+                      setPropertySearch("");
+                    }}
+                    className="px-8 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-800 rounded-2xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={preSubmitCheck}
+                    disabled={!selectedPropId || entryRows.some(r => r.assessedValue <= 0)}
+                    className="px-12 py-3 text-[10px] font-black uppercase tracking-widest bg-red-600 text-white rounded-2xl hover:bg-red-500 transition-all shadow-xl shadow-red-600/30 disabled:opacity-50 disabled:grayscale"
+                  >
+                    Issue Delinquency
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
         <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex flex-col md:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input 
               type="text" 
-              placeholder="Filter ledger by Owner, PIN, or Year..." 
+              placeholder="Filter ledger by Owner, Tax Dec No, or Year..." 
               className="w-full pl-10 pr-4 py-2 border border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-950 text-slate-300 text-sm transition-all"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="relative">
-            <Filter className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <select
-              title="Filter by Status"
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              className="pl-10 pr-8 py-2 border border-slate-800 bg-slate-950 rounded-xl text-slate-300 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-            >
-              <option value="All">All Statuses</option>
-              <option value="Delinquent">Delinquent</option>
-              <option value="Pending">Pending</option>
-              <option value="Paid">Paid</option>
-              <option value="Voided">Voided</option>
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
-              <svg className="h-4 w-4 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-                <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-              </svg>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <Filter className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <select
+                title="Filter by Status"
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="pl-10 pr-8 py-2 border border-slate-800 bg-slate-950 rounded-xl text-slate-300 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              >
+                <option value="All" className="bg-slate-950 text-slate-300">All Statuses</option>
+                <option value="Delinquent" className="bg-slate-950 text-slate-300">Delinquent</option>
+                <option value="Pending" className="bg-slate-950 text-slate-300">Pending</option>
+                <option value="Paid" className="bg-slate-950 text-slate-300">Paid</option>
+                <option value="Voided" className="bg-slate-950 text-slate-300">Voided</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                <svg className="h-4 w-4 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                  <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
+                </svg>
+              </div>
             </div>
           </div>
         </div>
@@ -263,268 +569,135 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Interest Accrued</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Aggregate Due</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ops</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              <AnimatePresence>
-                {isAdding && (
-                  <motion.tr 
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className="bg-red-500/5"
+              {groupedDelinquencies.map(group => (
+                <React.Fragment key={group.property.id}>
+                  <tr 
+                    className={cn(
+                      "hover:bg-indigo-500/[0.02] transition-colors cursor-pointer group/row",
+                      expandedPropId === group.property.id ? "bg-indigo-500/[0.04]" : ""
+                    )}
+                    onClick={() => setExpandedPropId(expandedPropId === group.property.id ? null : group.property.id)}
                   >
-                    <td colSpan={7} className="p-6">
-                      <form onSubmit={preSubmitCheck} className="space-y-4 max-w-4xl mx-auto bg-slate-900 p-6 rounded-2xl border border-red-500/20 shadow-2xl">
-                        <h3 className="font-bold text-red-400 flex items-center gap-2 uppercase tracking-widest text-xs">
-                          <AlertCircle className="w-4 h-4" />
-                          Initialize Delinquency Entry
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                          <div className="col-span-1 md:col-span-2 relative">
-                            {selectedPropId ? (
-                              <div className="flex items-center justify-between p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
-                                <div className="truncate">
-                                  <p className="text-[10px] font-bold text-indigo-400">
-                                    {properties.find(p => p.id === selectedPropId)?.pin}
-                                  </p>
-                                  <p className="text-xs text-white truncate max-w-[200px]">
-                                    {properties.find(p => p.id === selectedPropId)?.ownerName}
-                                  </p>
-                                </div>
-                                <button 
-                                  type="button" 
-                                  onClick={() => {
-                                    setSelectedPropId("");
-                                    setPropertySearch("");
-                                  }}
-                                  className="p-1 hover:bg-red-500/10 rounded text-red-500 transition"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="relative">
-                                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                  <input 
-                                    type="text"
-                                    placeholder="Search Tax Dec..."
-                                    className="w-full pl-10 pr-4 py-2 border border-slate-700 bg-slate-950 rounded-lg text-xs text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
-                                    value={propertySearch}
-                                    onChange={e => {
-                                      setPropertySearch(e.target.value);
-                                      setFocusedSearchIndex(-1);
-                                    }}
-                                    onKeyDown={e => {
-                                      if (propertySearchResults.length === 0) return;
-                                      
-                                      if (e.key === "ArrowDown") {
-                                        e.preventDefault();
-                                        setFocusedSearchIndex(prev => 
-                                          prev < propertySearchResults.length - 1 ? prev + 1 : prev
-                                        );
-                                      } else if (e.key === "ArrowUp") {
-                                        e.preventDefault();
-                                        setFocusedSearchIndex(prev => prev > 0 ? prev - 1 : 0);
-                                      } else if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        const selectedIndex = focusedSearchIndex >= 0 ? focusedSearchIndex : 0;
-                                        setSelectedPropId(propertySearchResults[selectedIndex].id);
-                                        setPropertySearch("");
-                                        setPropertySearchResults([]);
-                                        setFocusedSearchIndex(-1);
-                                      }
-                                    }}
-                                  />
-                                </div>
-                                <AnimatePresence>
-                                  {propertySearchResults.length > 0 && (
-                                    <motion.div 
-                                      initial={{ opacity: 0, y: -10 }}
-                                      animate={{ opacity: 1, y: 0 }}
-                                      className="absolute z-50 w-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden"
-                                    >
-                                      {propertySearchResults.map((p, idx) => (
-                                        <button
-                                          key={p.id}
-                                          type="button"
-                                          onClick={() => {
-                                            setSelectedPropId(p.id);
-                                            setPropertySearch("");
-                                            setPropertySearchResults([]);
-                                            setFocusedSearchIndex(-1);
-                                          }}
-                                          className={cn(
-                                            "w-full p-3 text-left border-b border-slate-800 last:border-0 transition-colors",
-                                            focusedSearchIndex === idx ? "bg-indigo-500/20" : "hover:bg-indigo-500/10"
-                                          )}
-                                        >
-                                          <div className="flex items-center justify-between">
-                                            <p className="text-xs font-bold text-white uppercase">{p.pin}</p>
-                                            {p.isIdle && <span className="text-[8px] bg-amber-500/10 text-amber-500 px-1 rounded uppercase font-bold">Idle</span>}
-                                          </div>
-                                          <p className="text-[10px] text-slate-500 truncate">{p.ownerName}</p>
-                                        </button>
-                                      ))}
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </>
-                            )}
-                          </div>
-                          <select 
-                            className="px-3 py-2 border border-slate-700 bg-slate-950 rounded-lg text-xs text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none"
-                            value={year}
-                            onChange={e => setYear(parseInt(e.target.value))}
-                            required
-                          >
-                            {Array.from({ length: 30 }, (_, i) => new Date().getFullYear() - 1 - i).map(y => (
-                              <option key={y} value={y}>{y}</option>
-                            ))}
-                          </select>
-                          <input 
-                            type="number" 
-                            placeholder="Basic Tax" 
-                            className="px-3 py-2 border border-slate-700 bg-slate-950 rounded-lg text-xs text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none"
-                            value={Number.isNaN(basicTax) ? "" : basicTax}
-                            onChange={e => setBasicTax(parseFloat(e.target.value) || 0)}
-                            required
-                          />
-                          <input 
-                            type="number" 
-                            placeholder="SEF Tax" 
-                            className="px-3 py-2 border border-slate-700 bg-slate-950 rounded-lg text-xs text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none"
-                            value={Number.isNaN(sefTax) ? "" : sefTax}
-                            onChange={e => setSefTax(parseFloat(e.target.value) || 0)}
-                          />
-                          <input 
-                            type="number" 
-                            placeholder="Idle Land Surcharge" 
-                            className="px-3 py-2 border border-slate-700 bg-slate-950 rounded-lg text-xs text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none"
-                            value={Number.isNaN(idleTax) ? "" : idleTax}
-                            onChange={e => setIdleTax(parseFloat(e.target.value) || 0)}
-                          />
+                    <td className="px-6 py-5">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "p-1.5 rounded-lg transition-colors border",
+                          expandedPropId === group.property.id ? "bg-indigo-500/20 border-indigo-500/30 text-indigo-400" : "bg-slate-800 border-slate-700 text-slate-500 group-hover/row:border-slate-600"
+                        )}>
+                          {expandedPropId === group.property.id ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                         </div>
-                        <div className="flex justify-end gap-2 pt-2">
-                          <button 
-                            type="button" 
-                            onClick={() => {
-                              setIsAdding(false);
-                              setSelectedPropId("");
-                              setPropertySearch("");
-                              setPropertySearchResults([]);
-                            }}
-                            className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-800 rounded-xl transition"
-                          >
-                            Abort
-                          </button>
-                          <button 
-                            type="submit"
-                            className="px-6 py-2 text-xs font-bold uppercase tracking-widest bg-red-600 text-white rounded-xl hover:bg-red-500 transition shadow-lg shadow-red-600/20"
-                          >
-                            Commit Record
-                          </button>
-                        </div>
-                      </form>
-                    </td>
-                  </motion.tr>
-                )}
-              </AnimatePresence>
-
-              {filtered.map(d => {
-                const prop = properties.find(p => p.id === d.propertyId);
-                const currentCalc = calculateTotalDue(d.basicTaxDue, d.sefTaxDue, d.year, new Date(), (d as any).idleSurcharge || 0);
-                return (
-                  <tr key={d.id} className="hover:bg-indigo-500/[0.02] transition-colors group">
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-slate-200 text-sm tracking-tight">{prop?.ownerName || "Unknown Profile"}</span>
-                        <span className="text-[10px] font-mono text-slate-500 font-bold">{prop?.pin}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-xs text-slate-400 text-center font-bold tracking-widest">{d.year}</td>
-                    <td className="px-6 py-4 text-sm text-slate-400 font-medium">
-                      {formatCurrency(d.basicTaxDue + d.sefTaxDue + ((d as any).idleSurcharge || 0))}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-red-400 font-bold">
-                      +{formatCurrency(currentCalc.interest)}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-white font-black">
-                      <div className="flex items-center gap-2 relative group/tooltip w-max">
-                        {formatCurrency(currentCalc.totalDue)}
-                        <Info className="w-4 h-4 text-slate-500 hover:text-slate-300 transition-colors cursor-help" />
-                        
-                        <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 w-56 bg-slate-900 border border-slate-700 p-3 rounded-xl shadow-2xl opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-all z-50">
-                          <div className="text-[10px] uppercase font-bold text-slate-500 tracking-widest mb-3 border-b border-slate-800 pb-2">Amount Breakdown</div>
-                          <div className="flex justify-between text-xs mb-1.5">
-                            <span className="text-slate-400">Basic Tax:</span>
-                            <span className="text-white font-medium">{formatCurrency(d.basicTaxDue)}</span>
-                          </div>
-                          <div className="flex justify-between text-xs mb-1.5">
-                            <span className="text-slate-400">SEF Tax:</span>
-                            <span className="text-white font-medium">{formatCurrency(d.sefTaxDue)}</span>
-                          </div>
-                          {((d as any).idleSurcharge > 0) && (
-                            <div className="flex justify-between text-xs mb-1.5">
-                              <span className="text-slate-400">Idle Surcharge:</span>
-                              <span className="text-white font-medium">{formatCurrency((d as any).idleSurcharge)}</span>
-                            </div>
-                          )}
-                          <div className="flex justify-between text-xs mb-3">
-                            <span className="text-slate-400">Penalties:</span>
-                            <span className="text-red-400 font-medium">{formatCurrency(currentCalc.interest)}</span>
-                          </div>
-                          <div className="pt-2 border-t border-slate-700 flex justify-between text-xs font-bold">
-                            <span className="text-slate-300 uppercase tracking-widest">Aggregate:</span>
-                            <span className="text-white">{formatCurrency(currentCalc.totalDue)}</span>
-                          </div>
+                        <div className="flex flex-col">
+                          <span className="font-bold text-slate-200 text-sm tracking-tight">{group.property.ownerName}</span>
+                          <span className="text-[10px] font-mono text-slate-500 font-bold uppercase tracking-widest">{group.property.tdNumber}</span>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      {(() => {
-                        const isEffectivelyPaid = d.status === "Paid" && d.paymentDetails?.orNumber;
-                        const statusToDisplay = (d.status === "Paid" && !isEffectivelyPaid) ? "Delinquent" : d.status;
-                        
-                        return (
-                          <span className={cn(
-                            "inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest border",
-                            statusToDisplay === "Delinquent" ? "bg-red-500/10 text-red-400 border-red-500/20" :
-                            statusToDisplay === "Pending" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
-                            statusToDisplay === "Paid" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                            statusToDisplay === "Voided" ? "bg-slate-800 text-slate-400 border-slate-700" :
-                            "bg-slate-800 text-slate-500 border-slate-700"
-                          )}>
-                            {statusToDisplay === "Delinquent" ? <AlertCircle className="w-3 h-3" /> : 
-                             statusToDisplay === "Pending" ? <Clock className="w-3 h-3" /> : 
-                             statusToDisplay === "Paid" ? <CheckCircle2 className="w-3 h-3" /> :
-                             statusToDisplay === "Voided" ? <XCircle className="w-3 h-3" /> :
-                             <CheckCircle2 className="w-3 h-3" />}
-                            {statusToDisplay}
-                          </span>
-                        );
-                      })()}
+                    <td className="px-6 py-5 text-xs text-slate-400 text-center font-bold tracking-widest leading-relaxed">
+                      {group.minYear === group.maxYear ? group.minYear : `${group.minYear} – ${group.maxYear}`}
+                      <div className="text-[10px] text-indigo-500 mt-0.5">{group.delinquencies.length} record(s)</div>
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      {d.status === "Paid" && d.paymentDetails && (
-                        <div className="flex flex-col items-end text-[9px] font-mono text-emerald-500/60 group-hover:text-emerald-500 transition-colors">
-                          <div className="flex items-center gap-1">
-                            <Receipt className="w-3 h-3" />
-                            <span>OR: {d.paymentDetails.orNumber}</span>
-                          </div>
-                          <span>{d.paymentDetails.paymentDate}</span>
-                        </div>
-                      )}
+                    <td className="px-6 py-5 text-sm text-slate-400 font-medium">
+                      {formatCurrency(group.totalPrincipal)}
+                    </td>
+                    <td className="px-6 py-5 text-sm text-red-400 font-bold">
+                      +{formatCurrency(group.totalInterest)}
+                    </td>
+                    <td className="px-6 py-5 text-sm text-white font-black">
+                      {formatCurrency(group.totalDue)}
+                    </td>
+                    <td className="px-6 py-5">
+                      <span className={cn(
+                        "inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest border bg-red-500/10 text-red-400 border-red-500/20 shadow-sm shadow-red-500/10"
+                      )}>
+                        <AlertCircle className="w-3 h-3" />
+                        Account Delinquent
+                      </span>
                     </td>
                   </tr>
-                );
-              })}
+
+                  {/* Expanded content */}
+                  {expandedPropId === group.property.id && (
+                    <tr className="bg-slate-950/40">
+                      <td colSpan={7} className="px-10 py-6">
+                        <motion.div 
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          className="overflow-hidden border border-slate-800 rounded-2xl bg-slate-900/40"
+                        >
+                          <table className="w-full text-left">
+                            <thead className="bg-slate-950 border-b border-slate-800">
+                              <tr>
+                                <th className="px-6 py-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest">Assessment Year</th>
+                                <th className="px-6 py-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest">Principal Basis</th>
+                                <th className="px-6 py-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest">Penalty</th>
+                                <th className="px-6 py-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest text-indigo-400">Total Due</th>
+                                <th className="px-6 py-3 text-[9px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/50">
+                              {(() => {
+                                const grouped = groupDelinquenciesByPenaltyRule(group.delinquencies, group.property.assessedValue);
+                                return grouped.map(row => {
+                                  // For actions, we still need a reference delinquency if it's a single year
+                                  const baseDelinq = row.years.length === 1 ? group.delinquencies.find(d => d.year === row.years[0]) : null;
+
+                                  return (
+                                    <tr key={`${row.ids.join(',')}-${row.quarterLabel || 'full'}`} className="hover:bg-white/[0.02]">
+                                      <td className="px-6 py-3 text-xs font-mono font-bold text-slate-400 italic">FY {row.yearDisplay}</td>
+                                      <td className="px-6 py-3 text-xs text-slate-500">{formatCurrency(row.totalBasic + row.totalSef)}</td>
+                                      <td className="px-6 py-3 text-xs text-red-500/70">+{formatCurrency(row.totalInterest)}</td>
+                                      <td className="px-6 py-3 text-xs text-white font-bold">{formatCurrency(row.totalDue)}</td>
+                                      <td className="px-6 py-3">
+                                        <span className={cn(
+                                          "px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border",
+                                          row.years.some(y => group.delinquencies.find(d => d.year === y)?.status === "Delinquent") ? "bg-red-500/5 text-red-500 border-red-500/10" :
+                                          row.years.some(y => group.delinquencies.find(d => d.year === y)?.status === "Pending") ? "bg-amber-500/5 text-amber-500 border-amber-500/10" :
+                                          "bg-emerald-500/5 text-emerald-400 border-emerald-500/10"
+                                        )}>
+                                          {row.years.length > 1 ? "Delinquent (Grouped)" : (group.delinquencies.find(d => d.year === row.years[0])?.status || "Delinquent")}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                });
+                              })()}
+                            </tbody>
+                          </table>
+                        </motion.div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+              
+              {groupedDelinquencies.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-6 py-20 text-center">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-12 h-12 bg-slate-950 rounded-2xl flex items-center justify-center border border-slate-800">
+                        <Search className="w-6 h-6 text-slate-700" />
+                      </div>
+                      <p className="text-slate-500 text-sm italic font-medium tracking-tight">No entities found matching the current filtration protocol.</p>
+                    </div>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
+      {activeDelinquency && (
+        <DelinquencyActions 
+          delinquency={activeDelinquency}
+          property={properties.find(p => p.id === activeDelinquency.propertyId)!}
+          onClose={() => setActiveDelinquency(null)}
+          isEncoder={isEncoder}
+          isAdmin={isAdmin}
+        />
+      )}
     </div>
   );
 };

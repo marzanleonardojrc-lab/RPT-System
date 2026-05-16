@@ -8,7 +8,8 @@ import {
   History,
   ShieldCheck,
   Building2,
-  AlertCircle
+  AlertCircle,
+  Calculator
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -23,7 +24,9 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, is
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "properties", label: "Properties", icon: Building2 },
+    { id: "collection", label: "Collection", icon: FileText },
     { id: "delinquencies", label: "Delinquencies", icon: AlertCircle },
+    { id: "reconciliation", label: "Reconciliation", icon: Calculator },
     { id: "reports", label: "COA Reports", icon: FileText },
     { id: "audit", label: "Audit Logs", icon: History },
   ];
@@ -63,7 +66,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, is
         ))}
       </nav>
 
-      <div className="p-4 bg-slate-900/80 border-t border-slate-800">
+      <div className="p-4 bg-slate-950 border-t border-slate-800">
         <button
           onClick={onLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-red-500/10 hover:text-red-400 transition-all border border-transparent hover:border-red-500/20"

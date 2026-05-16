@@ -12,11 +12,14 @@ import {
 import { Upload, Check, AlertCircle, X, Loader2 } from "lucide-react";
 import { logAudit } from "../lib/audit";
 
+import { useAuth } from "../AuthContext";
+
 interface ImporterProps {
   onClose: () => void;
 }
 
 const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
+  const { profile } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<"idle" | "parsing" | "uploading" | "success" | "error">("idle");
   const [results, setResults] = useState({ success: 0, failed: 0 });
@@ -33,42 +36,64 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
+        const userName = profile?.username || profile?.displayName || "Imported";
         setStatus("uploading");
         let success = 0;
         let failed = 0;
 
         try {
-          // Fetch existing PINs to avoid duplicates
+          // Fetch existing TD Numbers to avoid duplicates
           const existingSnapshot = await getDocs(collection(db, "properties"));
-          const existingPINs = new Set<string>();
+          const existingTDs = new Set<string>();
           existingSnapshot.docs.forEach(doc => {
-            if (doc.data().pin) {
-              existingPINs.add(doc.data().pin);
+            if (doc.data().tdNumber) {
+              existingTDs.add(doc.data().tdNumber.trim().toLowerCase());
             }
           });
 
           for (const row of results.data as any) {
             try {
+              const tdRaw = String(row.tdNumber || row.taxDeclaration || "").trim();
               const pinRaw = String(row.pin || "").trim();
-              if (!pinRaw || !row.ownerName) {
+              
+              if (!tdRaw || !row.ownerName) {
                 failed++;
                 continue;
               }
 
-              if (existingPINs.has(pinRaw)) {
+              const tdLower = tdRaw.toLowerCase();
+              if (existingTDs.has(tdLower)) {
                 failed++;
                 continue;
               }
 
-              existingPINs.add(pinRaw); // Add to set to prevent duplicates within the same CSV
+              existingTDs.add(tdLower); // Add to set to prevent duplicates within the same CSV
 
               await addDoc(collection(db, "properties"), {
-                pin: pinRaw,
+                pin: pinRaw || tdRaw,
                 ownerName: String(row.ownerName).trim(),
-                assessedValue: parseFloat(row.assessedValue) || 0,
+                ownerAddress: row.ownerAddress || "",
+                administratorName: row.administratorName || "",
+                administratorAddress: row.administratorAddress || "",
+                effectivityDate: row.effectivityDate || new Date().toISOString().split('T')[0],
+                tdNumber: tdRaw,
+                detailedLocation: row.detailedLocation || row.barangay || "Unknown",
+                street: row.street || "",
                 barangay: row.barangay || "Unknown",
-                propertyType: row.propertyType || "Residential",
-                isIdle: row.isIdle === "true" || row.isIdle === "1" || row.isIdle === "Yes",
+                municipality: "Dipaculao",
+                province: "Aurora",
+                lotNo: row.lotNo || "",
+                blkNo: row.blkNo || "",
+                octTct: row.octTct || "",
+                cctCloa: row.cctCloa || "",
+                classification: (row.classification || row.propertyType || "LAND").toUpperCase() as any,
+                area: row.area || "0 sqm",
+                assessedValue: parseFloat(row.assessedValue) || 0,
+                previousTdNo: row.previousTdNo || "",
+                previousOwner: row.previousOwner || "",
+                previousAssessedValue: parseFloat(row.previousAssessedValue) || 0,
+                isArchived: false,
+                recordedBy: userName,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
                 imported: true
@@ -121,7 +146,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                 <p className="text-sm font-semibold text-white tracking-wide">
                   {file ? file.name : "Click to select CSV file"}
                 </p>
-                <p className="text-xs text-slate-500 mt-2">Required columns: pin, ownerName, assessedValue, barangay</p>
+                <p className="text-xs text-slate-500 mt-2">Required columns: tdNumber, ownerName, assessedValue, barangay (pin is optional)</p>
               </div>
               <button 
                 onClick={startImport}

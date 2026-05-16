@@ -7,12 +7,14 @@ import DelinquencyList from "./components/DelinquencyList";
 import COAReports from "./components/COAReports";
 import AuditLogView from "./components/AuditLogView";
 import Settings from "./components/Settings";
+import { ReconciliationModule } from "./components/ReconciliationModule";
+import CollectionModule from "./components/CollectionModule";
 import Login from "./components/Login";
 import ProfileModal from "./components/ProfileModal";
 import { AlertCircle } from "lucide-react";
 
 const AppContent: React.FC = () => {
-  const { user, profile, loading, logout, isAdmin, isEncoder } = useAuth();
+  const { user, profile, loading, logout, isAdmin, isEncoder, isOffline } = useAuth();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
@@ -133,7 +135,9 @@ const AppContent: React.FC = () => {
     switch (activeTab) {
       case "dashboard": return <Dashboard />;
       case "properties": return <PropertyRegistry isEncoder={isEncoder} isAdmin={isAdmin} />;
+      case "collection": return <CollectionModule />;
       case "delinquencies": return <DelinquencyList isEncoder={isEncoder} isAdmin={isAdmin} />;
+      case "reconciliation": return <ReconciliationModule />;
       case "reports": return <COAReports />;
       case "audit": return isAdmin ? <AuditLogView /> : denied;
       case "settings": return isAdmin ? <Settings /> : denied;
@@ -152,17 +156,14 @@ const AppContent: React.FC = () => {
       <main className="pl-64 min-h-screen bg-[radial-gradient(circle_at_top_right,_#1e293b,_transparent_40%)]">
         <header className="h-16 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 sticky top-0 z-10">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full">
-              <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
-              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">{activeTab} node</span>
-            </div>
+            {isOffline && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full">
+                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">Offline Mode</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-4">
-             <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
-              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
-              <span className="text-[10px] font-bold text-emerald-400 tracking-wider">SYSTEM SECURE</span>
-            </div>
-            <div className="h-8 w-px bg-slate-800 mx-2" />
             <div 
               className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 p-2 rounded-xl transition-colors"
               onClick={() => setIsProfileModalOpen(true)}

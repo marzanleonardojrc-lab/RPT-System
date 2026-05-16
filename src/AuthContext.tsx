@@ -37,6 +37,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   isAdmin: boolean;
   isEncoder: boolean;
+  isOffline: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,26 +46,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
           setUser(firebaseUser);
-          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          
+          // Try to fetch profile, if offline use cache
+          let userDoc;
+          try {
+            // First try normal getDoc (which uses cache if available)
+            userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+            setIsOffline(false);
+          } catch (docErr: any) {
+            console.error("Profile Fetch Error:", docErr);
+            if (docErr.message?.includes('offline')) {
+              setIsOffline(true);
+              // We might still want to try to get from cache if it fails with offline
+              // but getDoc usually does that. If it throws here, it means cache missed too.
+            }
+            setLoading(false);
+            return;
+          }
+
           if (userDoc.exists()) {
             setProfile(userDoc.data() as UserProfile);
           } else {
             // Handle case where user exists in Auth but not in Firestore (e.g., first Google login)
+            const baseUsername = firebaseUser.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, '') || "user";
+            let username = baseUsername;
+            
+            // Basic conflict check
+            const mappingDoc = await getDoc(doc(db, "user_mappings", username));
+            if (mappingDoc.exists()) {
+              username = `${baseUsername}${Math.floor(Math.random() * 1000)}`;
+            }
+
             const newProfile: any = {
               uid: firebaseUser.uid,
               email: firebaseUser.email || "",
               displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+              username: username,
               role: (firebaseUser.email === "marzanleonardojrc@gmail.com" || firebaseUser.email === "marzan.leonardo04@gmail.com") ? "Admin" : "End-User",
               status: (firebaseUser.email === "marzanleonardojrc@gmail.com" || firebaseUser.email === "marzan.leonardo04@gmail.com") ? "Approved" : "Pending",
               createdAt: serverTimestamp()
             };
             await setDoc(doc(db, "users", firebaseUser.uid), newProfile);
+            await setDoc(doc(db, "user_mappings", username), {
+              username: username,
+              email: firebaseUser.email
+            });
             setProfile({ ...newProfile, createdAt: new Date().toISOString() } as UserProfile);
           }
         } else {
@@ -230,6 +263,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateUserUsername,
       updateUserPassword,
       logout,
+      isOffline,
       isAdmin: (isApproved && profile?.role === "Admin") || isAdminEmail,
       isEncoder: (isApproved && (profile?.role === "Admin" || profile?.role === "End-User")) || isAdminEmail
     }}>

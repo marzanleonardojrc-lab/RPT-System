@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { signInWithEmailAndPassword, auth } from "../lib/firebase";
-import { Lock, X } from "lucide-react";
+import { auth, signInWithPopup, googleProvider } from "../lib/firebase";
+import { useAuth } from "../AuthContext";
+import { Lock, X, Mail } from "lucide-react";
 
 interface AdminAuthDialogProps {
   isOpen: boolean;
@@ -9,12 +10,35 @@ interface AdminAuthDialogProps {
 }
 
 export default function AdminAuthDialog({ isOpen, onClose, onConfirm }: AdminAuthDialogProps) {
-  const [email, setEmail] = useState("");
+  const { signInWithEmail } = useAuth();
+  const [emailOrUsername, setEmailOrUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleGoogleReAuth = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      // Re-authenticate using Google
+      await signInWithPopup(auth, googleProvider);
+      
+      // Check if the current user is an admin
+      const isAdmin = auth.currentUser?.email === "marzanleonardojrc@gmail.com" || auth.currentUser?.email === "marzan.leonardo04@gmail.com";
+      if (!isAdmin) {
+        throw new Error("Insufficient permissions. You are not an administrator.");
+      }
+
+      await onConfirm();
+      onClose();
+    } catch (err: any) {
+      setError(err.message || "Google authentication failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,20 +47,24 @@ export default function AdminAuthDialog({ isOpen, onClose, onConfirm }: AdminAut
 
     try {
       // Re-authenticate using the provided credentials
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmail(emailOrUsername, password);
       
       // If successful, run the confirm action
       await onConfirm();
       
       // Clear and close
-      setEmail("");
+      setEmailOrUsername("");
       setPassword("");
       onClose();
-    } catch (err) {
-      if (err instanceof Error) {
-        setError(err.message);
+    } catch (err: any) {
+      console.error("Admin verification error:", err);
+      const errorCode = err.code || "";
+      const errorMsg = err.message || "";
+
+      if (errorCode === 'auth/invalid-credential' || errorCode === 'auth/wrong-password' || errorCode === 'auth/user-not-found' || errorMsg.includes('invalid-credential')) {
+        setError("Invalid email/username or password. If you signed in with Google, please use the button below.");
       } else {
-        setError("Authentication failed. Please check credentials.");
+        setError(errorMsg || "Authentication failed. Please check credentials.");
       }
     } finally {
       setLoading(false);
@@ -58,17 +86,18 @@ export default function AdminAuthDialog({ isOpen, onClose, onConfirm }: AdminAut
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <p className="text-sm text-slate-400 mb-4">
-            Security policy requires re-authentication to perform this destructive action. Please enter your administrator email and password.
+            Security policy requires re-authentication to perform this destructive action. Please enter your administrator credentials.
           </p>
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Admin Email</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Email or Username</label>
             <input 
-              type="email" 
+              type="text" 
               required
               className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-red-500"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
+              value={emailOrUsername}
+              onChange={e => setEmailOrUsername(e.target.value)}
+              placeholder="Admin email or username"
             />
           </div>
 
@@ -85,25 +114,40 @@ export default function AdminAuthDialog({ isOpen, onClose, onConfirm }: AdminAut
 
           {error && (
             <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 font-bold">
-              {error}
+              {error.replace('Firebase: ', '')}
             </div>
           )}
 
-          <div className="flex gap-2 mt-6">
+
+          <div className="flex flex-col gap-2 mt-6">
+            <button
+              type="submit"
+              className="w-full px-4 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-500 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              disabled={loading}
+            >
+              {loading ? "Verifying..." : "Confirm with Password"}
+            </button>
+            <div className="flex items-center gap-2 py-2">
+              <div className="flex-1 h-px bg-slate-800" />
+              <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">OR</span>
+              <div className="flex-1 h-px bg-slate-800" />
+            </div>
+            <button
+              type="button"
+              onClick={handleGoogleReAuth}
+              className="w-full px-4 py-3 bg-slate-950 border border-slate-800 text-slate-300 rounded-xl font-bold hover:bg-slate-900 transition disabled:opacity-50 flex items-center justify-center gap-2"
+              disabled={loading}
+            >
+              <Mail className="w-4 h-4 text-indigo-400" />
+              Verify with Google Account
+            </button>
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-bold hover:bg-slate-700 transition"
+              className="w-full px-4 py-2 mt-2 text-slate-500 hover:text-slate-300 text-xs font-bold transition"
               disabled={loading}
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={loading}
-            >
-              {loading ? "Verifying..." : "Confirm Deletion"}
+              Cancel Operation
             </button>
           </div>
         </form>

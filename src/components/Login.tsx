@@ -3,6 +3,8 @@ import { useAuth } from "../AuthContext";
 import { Database, ShieldCheck, Mail, Lock, User, ArrowRight, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
+import municipalHallBg from "./municipal_hall.png";
+
 const Login: React.FC = () => {
   const { signIn, signInWithEmail, signUpWithEmail, resetPassword } = useAuth();
   const [isRegistering, setIsRegistering] = useState(false);
@@ -55,29 +57,26 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 selection:bg-indigo-500/30 overflow-hidden">
-      {/* Abstract Background */}
-      <div className="absolute inset-0 z-0 overflow-hidden">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-500/5 blur-[120px] rounded-full" />
-        <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(#6366f1 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 md:p-8 selection:bg-indigo-500/30 overflow-hidden relative w-full">
+      {/* Background Image */}
+      <div 
+        className="absolute inset-0 z-0 overflow-hidden bg-cover bg-center bg-no-repeat opacity-60 pointer-events-none"
+        style={{ backgroundImage: `url(${municipalHallBg})` }}
+      >
+        <div className="absolute inset-0 bg-slate-950/40 mix-blend-multiply" />
       </div>
 
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full relative z-10"
+        className="w-full max-w-5xl relative z-10"
       >
-        <div className="bg-slate-900/80 backdrop-blur-xl rounded-[2.5rem] shadow-2xl p-8 md:p-10 border border-slate-800 shadow-indigo-500/5">
-          <div className="text-center mb-8">
-            <motion.div 
-              whileHover={{ rotate: 0, scale: 1.05 }}
-              className="w-16 h-16 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-indigo-500/40 rotate-3 transition-all cursor-default"
-            >
-              <Database className="w-8 h-8 text-white" />
-            </motion.div>
-            <h1 className="text-3xl font-black text-white tracking-tight leading-none">RPT System</h1>
-            <p className="text-slate-500 mt-2 font-bold uppercase tracking-[0.3em] text-[9px] opacity-70">Secured Node Registry</p>
-          </div>
+        <div className="bg-slate-800/40 backdrop-blur-xl rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] p-8 md:p-12 border border-white/20 flex flex-col md:flex-row items-center gap-12">
+          
+          <div className="w-full md:w-1/2 relative z-20">
+            <div className="text-center mb-10">
+              <h1 className="text-4xl font-black text-white tracking-tight leading-none">Real Property Tax Delinquency Tracker</h1>
+            </div>
 
           <AnimatePresence mode="wait">
             <motion.form 
@@ -192,6 +191,36 @@ const Login: React.FC = () => {
                   </>
                 )}
               </button>
+
+              {!isRegistering && !isResetting && (
+                <>
+                  <div className="flex items-center gap-4 py-2">
+                    <div className="flex-1 h-px bg-slate-800" />
+                    <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest whitespace-nowrap">Trusted Authentication</span>
+                    <div className="flex-1 h-px bg-slate-800" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setLoading(true);
+                      setError(null);
+                      try {
+                        await signIn();
+                      } catch (err: any) {
+                        setError(err.message || "Google sign-in failed.");
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                    className="w-full bg-slate-950 border border-slate-800 text-white py-4 rounded-2xl font-bold text-sm transition-all hover:bg-slate-900 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3"
+                  >
+                    <Mail className="w-4 h-4 text-indigo-400" />
+                    Sign in with Google
+                  </button>
+                </>
+              )}
             </motion.form>
           </AnimatePresence>
 
@@ -232,13 +261,12 @@ const Login: React.FC = () => {
               </>
             )}
           </div>
-
-          <div className="mt-10 pt-8 border-t border-slate-800/50 text-center">
-            <div className="flex items-center justify-center gap-1.5 text-[9px] text-slate-600 font-bold uppercase tracking-[0.2em]">
-              <Lock className="w-3 h-3" />
-              Encrypted Session Node: PHL-LGC-V4
-            </div>
           </div>
+          
+          <div className="hidden md:flex flex-col items-center justify-center w-full md:w-1/2 transition-all duration-300 hover:scale-105 hover:drop-shadow-[0_20px_40px_rgba(99,102,241,0.2)]">
+             <img src="/logo.png" alt="Logo" className="w-full max-w-[320px] object-contain drop-shadow-2xl" />
+          </div>
+
         </div>
       </motion.div>
     </div>

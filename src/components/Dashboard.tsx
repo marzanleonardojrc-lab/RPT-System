@@ -8,6 +8,7 @@ import {
 } from "../lib/firebase";
 import { Delinquency } from "../types";
 import { formatCurrency, cn } from "../lib/utils";
+import { calculateTotalDue } from "../lib/taxCalculations";
 import { 
   BarChart, 
   Bar, 
@@ -20,8 +21,12 @@ import {
 } from "recharts";
 import { TrendingUp, Users, AlertCircle, CheckCircle2 } from "lucide-react";
 import { motion } from "motion/react";
+import { useAuth } from "../AuthContext";
 
 const Dashboard: React.FC = () => {
+  const { profile, user, isAdmin } = useAuth();
+  const firstName = isAdmin ? "Admin" : (profile?.displayName || user?.displayName || "User").split(" ")[0];
+
   const [stats, setStats] = useState({
     totalDelinquent: 0,
     totalPaid: 0,
@@ -59,17 +64,20 @@ const Dashboard: React.FC = () => {
     const computedStats = validRecords.reduce((acc, curr) => {
       if (curr.status === "Delinquent") {
         acc.delinquentProps.add(curr.propertyId);
-        acc.totalAmountDue += (Number(curr.totalDue) || 0);
+        // Receivables = Full Assessed Value (Basic Tax Due / 0.01)
+        const assessedValue = curr.basicTaxDue / 0.01;
+        acc.totalAmountDue += assessedValue;
       } else if (curr.status === "Paid") {
-        acc.totalPaid++;
+        acc.paidProps.add(curr.propertyId);
       }
       return acc;
-    }, { delinquentProps: new Set<string>(), totalPaid: 0, totalAmountDue: 0 });
+    }, { delinquentProps: new Set<string>(), paidProps: new Set<string>(), totalAmountDue: 0 });
 
     const yearGroups = validRecords.reduce((acc: any, curr) => {
       if (curr.status === "Delinquent") {
         const year = curr.year.toString();
-        acc[year] = (acc[year] || 0) + (Number(curr.totalDue) || 0);
+        const assessedValue = curr.basicTaxDue / 0.01;
+        acc[year] = (acc[year] || 0) + assessedValue;
       }
       return acc;
     }, {});
@@ -82,7 +90,7 @@ const Dashboard: React.FC = () => {
     setStats(prev => ({
       ...prev,
       totalDelinquent: computedStats.delinquentProps.size,
-      totalPaid: computedStats.totalPaid,
+      totalPaid: computedStats.paidProps.size,
       totalAmountDue: computedStats.totalAmountDue
     }));
     setChartData(newChartData);
@@ -90,13 +98,16 @@ const Dashboard: React.FC = () => {
 
   const statCards = [
     { label: "Accounts Delinquent", value: stats.totalDelinquent, icon: AlertCircle, color: "text-red-400", bg: "bg-red-500/5", border: "border-red-500/20" },
-    { label: "Total Recievables", value: formatCurrency(stats.totalAmountDue), icon: TrendingUp, color: "text-indigo-400", bg: "bg-indigo-500/5", border: "border-indigo-500/20" },
+    { label: "Total Receivables", value: formatCurrency(stats.totalAmountDue), icon: TrendingUp, color: "text-indigo-400", bg: "bg-indigo-500/5", border: "border-indigo-500/20" },
     { label: "Registered Properties", value: stats.propertyCount, icon: Users, color: "text-blue-400", bg: "bg-blue-500/5", border: "border-blue-500/20" },
     { label: "Paid This Year", value: stats.totalPaid, icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/5", border: "border-emerald-500/20" },
   ];
 
   return (
     <div className="space-y-8">
+      <div className="mb-4">
+        <h1 className="text-3xl font-black text-white tracking-tight">Welcome, {firstName}!</h1>
+      </div>
       <div className="flex items-end justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white tracking-tight">Executive Control</h2>
@@ -175,7 +186,7 @@ const Dashboard: React.FC = () => {
                   color: '#f1f5f9'
                 }}
                 itemStyle={{ color: '#818cf8', fontWeight: 'bold' }}
-                formatter={(val: number) => [formatCurrency(val), "Amount Due"]}
+                formatter={(val: number) => [formatCurrency(val), "Receivable Amount"]}
               />
               <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
                 {chartData.map((entry, index) => (
