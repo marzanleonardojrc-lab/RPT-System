@@ -13,6 +13,7 @@ import {
   limit
 } from "firebase/firestore";
 import { db, auth, OperationType, handleFirestoreError } from "../lib/firebase";
+import { addToOfflineQueue } from "../lib/offlineSync";
 import { useAuth } from "../AuthContext";
 import { Delinquency, Property, Payment } from "../types";
 import { calculateTotalDue, calculatePenalties, groupDelinquenciesByPenaltyRule, BASIC_TAX_RATE, SEF_TAX_RATE } from "../lib/taxCalculations";
@@ -36,14 +37,16 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { logAudit } from "../lib/audit";
 import DelinquencyActions from "./DelinquencyActions";
+import { TransactionHistoryModal } from "./TransactionHistoryModal";
 
 export default function CollectionModule() {
-  const { profile } = useAuth();
+  const { profile, isEncoder, isAdmin } = useAuth();
   const [delinquencies, setDelinquencies] = useState<Delinquency[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [isPosting, setIsPosting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedHistoryProperty, setSelectedHistoryProperty] = useState<Property | null>(null);
   
   // Modal Form State
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
@@ -287,6 +290,75 @@ export default function CollectionModule() {
     }
 
     setIsSubmitting(true);
+
+    if (!navigator.onLine) {
+      try {
+        const batchRows = displayRows.filter(row => row.ids.every(id => selectedDelinqIds.has(id)));
+        if (batchRows.length === 0) {
+          throw new Error("Selection resolved to zero records.");
+        }
+
+        const paymentDetailsList = [];
+        for (const row of batchRows) {
+          for (const dataRecord of row.records) {
+            const calc = calculateTotalDue(dataRecord.basicTaxDue, dataRecord.sefTaxDue, dataRecord.year, orDate ? new Date(orDate) : new Date(), 0, paymentMode, quarters, isAdvance);
+            paymentDetailsList.push({
+              delinquencyId: dataRecord.id,
+              year: dataRecord.year,
+              basicTaxDue: dataRecord.basicTaxDue,
+              sefTaxDue: dataRecord.sefTaxDue,
+              totalDue: calc.totalDue,
+              interest: calc.interest,
+              discount: calc.discount || 0,
+              isAdvanceVirtual: dataRecord.isAdvanceVirtual || false
+            });
+          }
+        }
+
+        const taskData = {
+          selectedProperty,
+          orNumber,
+          orDate,
+          taxPayer,
+          paymentMode,
+          quarters,
+          isAdvance,
+          isCash,
+          checkNumber,
+          checkPayee,
+          checkDate,
+          isCheck,
+          treasurer,
+          deputy,
+          paymentDetailsList,
+          recordedBy: profile?.username || profile?.displayName || auth.currentUser?.email || "System"
+        };
+
+        addToOfflineQueue("RECORD_PAYMENT", taskData, `Payment O.R. ${orNumber.trim()} (Offline)`);
+        
+        setErrorDialog({
+          isOpen: true,
+          title: "Offline Transaction Cached",
+          message: `The payment of ${formatCurrency(formTotals.total)} under O.R. Number ${orNumber.trim()} was successfully cached locally in Offline Mode!\n\nIt will be automatically synced with the server once your connection is restored.`,
+          type: "success"
+        });
+        setIsPosting(false);
+        resetForm();
+        return;
+      } catch (err: any) {
+        console.error("Offline draft error:", err);
+        setErrorDialog({
+          isOpen: true,
+          title: "Failed to cache transaction",
+          message: `Could not save offline transaction: ${err.message}`,
+          type: "danger"
+        });
+        return;
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+
     try {
       // VALIDATION LAYER 1: UNIQUE O.R. CHECK
       const orQuery = query(
@@ -342,8 +414,14 @@ export default function CollectionModule() {
           
           if (!dtSnap.empty) {
             const existingRecords = dtSnap.docs.map(doc => doc.data());
-            const matchingValue = existingRecords.find(r => r.assessedValue === selectedProperty.assessedValue);
             
+            // Check for identical O.R. Number for this Year and PIN
+            const hasDuplicateOR = existingRecords.some(r => r.orNumber === orNumber.trim());
+            if (hasDuplicateOR) {
+              throw new Error(`Duplicate Payment Detected: This OR is already recorded for this Tax Year.`);
+            }
+
+            const matchingValue = existingRecords.find(r => r.assessedValue === selectedProperty.assessedValue);
             if (matchingValue) {
               throw new Error(`DOUBLE TAXATION REJECTED: Tax for Year ${dataRecord.year} on property ${selectedProperty.tdNumber} has already been settled with an Assessed Value of ${formatCurrency(selectedProperty.assessedValue)}.`);
             }
@@ -387,19 +465,27 @@ export default function CollectionModule() {
           }
 
           try {
-            await updateDoc(doc(db, "delinquencies", targetDelinqId), {
-              status: "Paid",
-              totalPaid: calc.totalDue,
-              updatedAt: serverTimestamp(),
-              paymentDetails: { 
-                orNumber: orNumber.trim(), 
-                paymentDate: orDate, 
-                amountPaid: calc.totalDue, 
-                paymentType: paymentMode 
-              }
-            });
+            const dsQuery = query(
+              collection(db, "delinquencies"),
+              where("propertyId", "==", selectedProperty.id),
+              where("year", "==", dataRecord.year)
+            );
+            const dsSnap = await getDocs(dsQuery);
+            for (const delinqDoc of dsSnap.docs) {
+              await updateDoc(doc(db, "delinquencies", delinqDoc.id), {
+                status: "Paid",
+                totalPaid: calc.totalDue,
+                updatedAt: serverTimestamp(),
+                paymentDetails: { 
+                  orNumber: orNumber.trim(), 
+                  paymentDate: orDate, 
+                  amountPaid: calc.totalDue, 
+                  paymentType: paymentMode 
+                }
+              });
+            }
           } catch (err) {
-            handleFirestoreError(err, OperationType.UPDATE, `delinquencies/${targetDelinqId}`);
+            handleFirestoreError(err, OperationType.UPDATE, `delinquencies?propertyId=${selectedProperty.id}&year=${dataRecord.year}`);
           }
         }
       }
@@ -490,13 +576,15 @@ export default function CollectionModule() {
           <h2 className="text-2xl font-bold text-white tracking-tight">Collection Ledger</h2>
           <p className="text-slate-500 text-sm mt-1">Audit log of validated tax payments and property clearances.</p>
         </div>
-        <button 
-          onClick={() => setIsPosting(true)}
-          className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-500 transition shadow-lg shadow-indigo-600/20 font-bold text-xs uppercase tracking-wider"
-        >
-          <Receipt className="w-4 h-4" />
-          Post Payment Record
-        </button>
+        {isEncoder && (
+          <button 
+            onClick={() => setIsPosting(true)}
+            className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-500 transition shadow-lg shadow-indigo-600/20 font-bold text-xs uppercase tracking-wider"
+          >
+            <Receipt className="w-4 h-4" />
+            Post Payment Record
+          </button>
+        )}
       </div>
 
       {/* LEDGER TABLE */}
@@ -549,25 +637,34 @@ export default function CollectionModule() {
                   </td>
                   <td className="px-6 py-5 text-right font-bold uppercase tracking-widest flex items-center justify-end gap-2">
                     <button 
-                      onClick={() => {
-                        setActiveActionDelinq(group.records[0]);
-                        setActionTab("audit");
-                      }}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] transition-colors border border-slate-700"
+                      onClick={() => setSelectedHistoryProperty(group.property)}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600/10 hover:bg-indigo-500 hover:text-white text-indigo-400 rounded-lg text-[10px] transition-all border border-indigo-500/20 font-black cursor-pointer"
                     >
                       <History className="w-3.5 h-3.5" />
-                      AUDIT TRAIL
+                      PMT HISTORY
                     </button>
                     <button 
                       onClick={() => {
                         setActiveActionDelinq(group.records[0]);
-                        setActionTab("void");
+                        setActionTab("audit");
                       }}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-red-500/10 text-slate-300 hover:text-red-400 rounded-lg text-[10px] transition-colors border border-slate-700 hover:border-red-500/20"
+                      className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] transition-colors border border-slate-700 font-bold"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      VOID RECORD
+                      <History className="w-3.5 h-3.5 text-slate-450" />
+                      AUDIT TRAIL
                     </button>
+                    {isEncoder && (
+                      <button 
+                        onClick={() => {
+                          setActiveActionDelinq(group.records[0]);
+                          setActionTab("void");
+                        }}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-red-500/10 text-slate-300 hover:text-red-400 rounded-lg text-[10px] transition-colors border border-slate-700 hover:border-red-500/20"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        VOID RECORD
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -600,8 +697,8 @@ export default function CollectionModule() {
                delinquency={activeActionDelinq}
                property={properties.find(p => p.id === activeActionDelinq.propertyId)!}
                onClose={() => setActiveActionDelinq(null)}
-               isEncoder={true}
-               isAdmin={profile?.role === 'admin'}
+               isEncoder={isEncoder}
+               isAdmin={isAdmin}
                initialTab={actionTab}
                standalone={true}
              />
@@ -738,8 +835,17 @@ export default function CollectionModule() {
                   {/* ROW 3 */}
                   <div className="grid grid-cols-3 gap-2 items-center h-8">
                     <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">ARP/Tax DEC. NO.:</label>
-                    <div className="col-span-2 h-8 flex items-center px-3 bg-slate-950/50 border border-slate-800 rounded-lg text-slate-400 text-xs italic truncate">
-                      {selectedProperty?.tdNumber || "No property..."}
+                    <div className="col-span-2 h-8 flex items-center justify-between px-3 bg-slate-950/50 border border-slate-800 rounded-lg text-slate-400 text-xs italic truncate">
+                      <span>{selectedProperty?.tdNumber || "No property..."}</span>
+                      {selectedProperty && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedHistoryProperty(selectedProperty)}
+                          className="px-2 py-0.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 rounded text-[9px] border border-indigo-500/20 hover:border-indigo-500/30 transition-all font-black uppercase tracking-wider cursor-pointer"
+                        >
+                          Show History
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-2 items-center h-8 relative">
@@ -1049,6 +1155,15 @@ export default function CollectionModule() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedHistoryProperty && (
+          <TransactionHistoryModal
+            property={selectedHistoryProperty}
+            onClose={() => setSelectedHistoryProperty(null)}
+          />
         )}
       </AnimatePresence>
 

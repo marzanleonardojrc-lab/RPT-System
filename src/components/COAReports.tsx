@@ -8,7 +8,7 @@ import {
   handleFirestoreError,
   OperationType
 } from "../lib/firebase";
-import { Delinquency, Property } from "../types";
+import { Delinquency, Property, Payment } from "../types";
 import { calculateTotalDue, groupDelinquenciesByPenaltyRule, GroupedDelinquency } from "../lib/taxCalculations";
 import { formatCurrency } from "../lib/utils";
 import { Printer, FileSpreadsheet, Settings2 } from "lucide-react";
@@ -18,7 +18,7 @@ import ConfirmDialog from "./ConfirmDialog";
 type ReportType = "delinquency" | "collection" | "masterlist";
 
 const COAReports: React.FC = () => {
-  const [data, setData] = useState<{ delinq: Delinquency[]; props: Property[] }>({ delinq: [], props: [] });
+  const [data, setData] = useState<{ delinq: Delinquency[]; props: Property[]; payments: Payment[] }>({ delinq: [], props: [], payments: [] });
   const [loading, setLoading] = useState(true);
   
   const [reportType, setReportType] = useState<ReportType>("delinquency");
@@ -54,9 +54,17 @@ const COAReports: React.FC = () => {
       handleFirestoreError(error, OperationType.GET, "properties");
     });
 
+    const unsubPayments = onSnapshot(collection(db, "payments"), (snapshot) => {
+      const paymentsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment));
+      setData(prev => ({ ...prev, payments: paymentsData }));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "payments");
+    });
+
     return () => {
       unsubDelinq();
       unsubProps();
+      unsubPayments();
     };
   }, []);
 
@@ -90,8 +98,11 @@ const COAReports: React.FC = () => {
     }
 
     let delinq = data.delinq.filter(d => {
-      if (reportType === "delinquency") return d.status === "Delinquent";
-      if (reportType === "collection") return d.status === "Paid";
+      const hasPayment = data.payments.some(p => p.propertyId === d.propertyId && p.taxYear === d.year && p.status === "Active");
+      const isPaid = d.status === "Paid" || hasPayment;
+
+      if (reportType === "delinquency") return !isPaid;
+      if (reportType === "collection") return isPaid;
       return true;
     });
 

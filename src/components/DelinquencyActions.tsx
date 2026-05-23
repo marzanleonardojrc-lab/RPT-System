@@ -65,7 +65,7 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
   useEffect(() => {
     const q = query(
       collection(db, "payments"),
-      where("delinquencyId", "==", delinquency.id),
+      where("propertyId", "==", property.id),
       orderBy("recordedAt", "desc")
     );
 
@@ -74,7 +74,7 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "payments");
     });
-  }, [delinquency.id]);
+  }, [property.id]);
 
   // Record State - Removed update/payment states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -198,8 +198,9 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
                   TD: {property.tdNumber}
                 </div>
                 {(() => {
-                  const isEffectivelyPaid = delinquency.status === "Paid" && delinquency.paymentDetails?.orNumber;
-                  const statusToDisplay = (delinquency.status === "Paid" && !isEffectivelyPaid) ? "Delinquent" : delinquency.status;
+                  const hasPayment = payments.some(p => p.taxYear === delinquency.year && p.status === "Active");
+                  const isEffectivelyPaid = delinquency.status === "Paid" || hasPayment;
+                  const statusToDisplay = isEffectivelyPaid ? "Paid" : delinquency.status;
                   return (
                     <div className={cn(
                       "flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest border",

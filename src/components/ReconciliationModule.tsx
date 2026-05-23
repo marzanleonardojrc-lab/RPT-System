@@ -27,7 +27,7 @@ import { useAuth } from "../AuthContext";
 import { Property, Delinquency } from "../types";
 
 export const ReconciliationModule: React.FC = () => {
-  const { auth } = useAuth();
+  const { auth, isEncoder } = useAuth();
   const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear().toString());
   
   const [properties, setProperties] = useState<Property[]>([]);
@@ -258,7 +258,7 @@ export const ReconciliationModule: React.FC = () => {
               })}
             </select>
           </div>
-          {!isCertified && (
+          {!isCertified && isEncoder && (
             <button 
               onClick={() => handleSaveSnapshot('draft')}
               disabled={isSaving}
@@ -535,14 +535,16 @@ export const ReconciliationModule: React.FC = () => {
                     All three departments agree. The reconciliation report can be certified and submitted to the Accounting Office and COA.
                   </p>
                   {!isCertified ? (
-                    <button 
-                      onClick={() => handleSaveSnapshot('certified')}
-                      disabled={isSaving}
-                      className="mt-4 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-sm text-sm disabled:opacity-50"
-                    >
-                      <FileCheck2 className="w-4 h-4" />
-                      {isSaving ? "Certifying..." : "Certify & Submit Report"}
-                    </button>
+                    isEncoder && (
+                      <button 
+                        onClick={() => handleSaveSnapshot('certified')}
+                        disabled={isSaving}
+                        className="mt-4 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-sm text-sm disabled:opacity-50"
+                      >
+                        <FileCheck2 className="w-4 h-4" />
+                        {isSaving ? "Certifying..." : "Certify & Submit Report"}
+                      </button>
+                    )
                   ) : (
                     <button 
                       disabled
@@ -571,14 +573,16 @@ export const ReconciliationModule: React.FC = () => {
                       : "Suggest reviewing Treasurer's collections for potential duplicates."}
                   </p>
                   {!isCertified ? (
-                    <button 
-                      onClick={() => handleSaveSnapshot('certified')}
-                      disabled={isSaving}
-                      className="mt-4 flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-sm text-sm disabled:opacity-50"
-                    >
-                      <FileCheck2 className="w-4 h-4" />
-                      {isSaving ? "Certifying..." : "Certify With Variance"}
-                    </button>
+                    isEncoder && (
+                      <button 
+                        onClick={() => handleSaveSnapshot('certified')}
+                        disabled={isSaving}
+                        className="mt-4 flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-sm text-sm disabled:opacity-50"
+                      >
+                        <FileCheck2 className="w-4 h-4" />
+                        {isSaving ? "Certifying..." : "Certify With Variance"}
+                      </button>
+                    )
                   ) : (
                     <button 
                       disabled

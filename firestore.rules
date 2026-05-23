@@ -37,7 +37,7 @@ service cloud.firestore {
       ); 
     }
     
-    function isEncoder() { return isAdmin() || hasRole('End-User'); }
+    function isEncoder() { return isAdmin() || hasRole('User') || hasRole('End-User'); }
     function isViewer() { return isAdmin() || isApproved(); }
     
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
@@ -47,7 +47,7 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.uid == request.auth.uid &&
              data.email == (request.auth.token.email != null ? request.auth.token.email : '') &&
-             data.role in ['Admin', 'End-User'] &&
+             data.role in ['Admin', 'User', 'Guest', 'End-User'] &&
              data.status in ['Pending', 'Approved', 'Denied'] &&
              (resource == null ? data.createdAt == request.time : data.createdAt == existing().createdAt);
     }

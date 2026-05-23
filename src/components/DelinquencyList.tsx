@@ -12,19 +12,21 @@ import {
   OperationType 
 } from "../lib/firebase";
 import { useAuth } from "../AuthContext";
-import { Delinquency, Property, DelinquencyStatus, PaymentDetails } from "../types";
+import { Delinquency, Property, DelinquencyStatus, PaymentDetails, Payment } from "../types";
 import { calculateTotalDue, calculatePenalties, groupDelinquenciesByPenaltyRule, GroupedDelinquency, BASIC_TAX_RATE, SEF_TAX_RATE, IDLE_LAND_RATE } from "../lib/taxCalculations";
 import { cn, formatCurrency } from "../lib/utils";
-import { Plus, Search, Filter, CreditCard, AlertCircle, CheckCircle2, Receipt, X, Clock, XCircle, Info, ArrowUp } from "lucide-react";
+import { Plus, Search, Filter, CreditCard, AlertCircle, CheckCircle2, Receipt, X, Clock, XCircle, Info, ArrowUp, Printer, FileText } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { logAudit } from "../lib/audit";
 import ConfirmDialog from "./ConfirmDialog";
 import DelinquencyActions from "./DelinquencyActions";
+import { NoticeOfDelinquencyPrintView } from "./NoticeOfDelinquencyPrintView";
 
 const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ isEncoder, isAdmin }) => {
   const { profile } = useAuth();
   const [delinquencies, setDelinquencies] = useState<Delinquency[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [activeDelinquency, setActiveDelinquency] = useState<Delinquency | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -34,6 +36,7 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
   const [propertySearch, setPropertySearch] = useState("");
   const [propertySearchResults, setPropertySearchResults] = useState<Property[]>([]);
   const [focusedSearchIndex, setFocusedSearchIndex] = useState(-1);
+  const [selectedPrintNotice, setSelectedPrintNotice] = useState<any | null>(null);
 
   // Dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -74,7 +77,13 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
       handleFirestoreError(error, OperationType.GET, "properties");
     });
 
-    return () => { unsubDelinq(); unsubProp(); };
+    const unsubPayments = onSnapshot(collection(db, "payments"), (snapshot) => {
+      setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "payments");
+    });
+
+    return () => { unsubDelinq(); unsubProp(); unsubPayments(); };
   }, []);
 
   const [entryRows, setEntryRows] = useState<{ id: string; startYear: number; endYear: number; assessedValue: number }[]>([
@@ -220,8 +229,9 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
       const prop = properties.find(p => p.id === d.propertyId);
       if (!prop || prop.isArchived) return;
 
-      const isEffectivelyPaid = d.status === "Paid" && d.paymentDetails?.orNumber;
-      const statusToDisplay = (d.status === "Paid" && !isEffectivelyPaid) ? "Delinquent" : d.status;
+      const hasPayment = payments.some(p => p.propertyId === d.propertyId && p.taxYear === d.year && p.status === "Active");
+      const isEffectivelyPaid = d.status === "Paid" || hasPayment;
+      const statusToDisplay = isEffectivelyPaid ? "Paid" : d.status;
 
       // Search matching
       const searchStr = `${prop.ownerName} ${prop.tdNumber} ${d.year}`.toLowerCase();
@@ -266,7 +276,7 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
     });
 
     return Object.values(groups).sort((a, b) => a.property.ownerName.localeCompare(b.property.ownerName));
-  }, [delinquencies, properties, searchTerm, statusFilter]);
+  }, [delinquencies, properties, searchTerm, statusFilter, payments]);
 
   return (
     <div className="space-y-6">
@@ -572,51 +582,75 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {groupedDelinquencies.map(group => (
-                <React.Fragment key={group.property.id}>
-                  <tr 
-                    className={cn(
-                      "hover:bg-indigo-500/[0.02] transition-colors cursor-pointer group/row",
-                      expandedPropId === group.property.id ? "bg-indigo-500/[0.04]" : ""
-                    )}
-                    onClick={() => setExpandedPropId(expandedPropId === group.property.id ? null : group.property.id)}
-                  >
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "p-1.5 rounded-lg transition-colors border",
-                          expandedPropId === group.property.id ? "bg-indigo-500/20 border-indigo-500/30 text-indigo-400" : "bg-slate-800 border-slate-700 text-slate-500 group-hover/row:border-slate-600"
-                        )}>
-                          {expandedPropId === group.property.id ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {groupedDelinquencies.map(group => {
+                const delinquentRecords = group.delinquencies.filter(d => 
+                  d.status === "Delinquent" && 
+                  !payments.some(p => p.propertyId === group.property.id && p.taxYear === d.year && p.status === "Active")
+                );
+                const minDelinqYear = delinquentRecords.length > 0 ? Math.min(...delinquentRecords.map(d => d.year)) : group.minYear;
+                const outstandingPeriods = delinquentRecords.length > 0 ? (new Date().getFullYear() - minDelinqYear) : 0;
+                const showNotice = delinquentRecords.length >= 2 || (delinquentRecords.length > 0 && outstandingPeriods >= 2);
+
+                return (
+                  <React.Fragment key={group.property.id}>
+                    <tr 
+                      className={cn(
+                        "hover:bg-indigo-500/[0.02] transition-colors cursor-pointer group/row",
+                        expandedPropId === group.property.id ? "bg-indigo-500/[0.04]" : ""
+                      )}
+                      onClick={() => setExpandedPropId(expandedPropId === group.property.id ? null : group.property.id)}
+                    >
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "p-1.5 rounded-lg transition-colors border",
+                            expandedPropId === group.property.id ? "bg-indigo-500/20 border-indigo-500/30 text-indigo-400" : "bg-slate-800 border-slate-700 text-slate-500 group-hover/row:border-slate-600"
+                          )}>
+                            {expandedPropId === group.property.id ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="font-bold text-slate-200 text-sm tracking-tight">{group.property.ownerName}</span>
+                            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase tracking-widest">{group.property.tdNumber}</span>
+                          </div>
                         </div>
-                        <div className="flex flex-col">
-                          <span className="font-bold text-slate-200 text-sm tracking-tight">{group.property.ownerName}</span>
-                          <span className="text-[10px] font-mono text-slate-500 font-bold uppercase tracking-widest">{group.property.tdNumber}</span>
+                      </td>
+                      <td className="px-6 py-5 text-xs text-slate-400 text-center font-bold tracking-widest leading-relaxed">
+                        {group.minYear === group.maxYear ? group.minYear : `${group.minYear} – ${group.maxYear}`}
+                        <div className="text-[10px] text-indigo-500 mt-0.5">{group.delinquencies.length} record(s)</div>
+                      </td>
+                      <td className="px-6 py-5 text-sm text-slate-400 font-medium">
+                        {formatCurrency(group.totalPrincipal)}
+                      </td>
+                      <td className="px-6 py-5 text-sm text-red-400 font-bold">
+                        +{formatCurrency(group.totalInterest)}
+                      </td>
+                      <td className="px-6 py-5 text-sm text-white font-black">
+                        {formatCurrency(group.totalDue)}
+                      </td>
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest border bg-red-500/10 text-red-400 border-red-500/20 shadow-sm shadow-red-500/10"
+                          )}>
+                            <AlertCircle className="w-3 h-3" />
+                            Account Delinquent
+                          </span>
+                          {showNotice && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPrintNotice(group);
+                              }}
+                              title="Generate Notice of Delinquency (> 2 Years Delinquent)"
+                              className="p-1.5 bg-red-600/10 hover:bg-red-600 border border-red-500/20 hover:border-red-500 rounded-lg text-red-400 hover:text-white transition-all cursor-pointer shadow-sm active:scale-95 flex items-center justify-center shrink-0"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5 text-xs text-slate-400 text-center font-bold tracking-widest leading-relaxed">
-                      {group.minYear === group.maxYear ? group.minYear : `${group.minYear} – ${group.maxYear}`}
-                      <div className="text-[10px] text-indigo-500 mt-0.5">{group.delinquencies.length} record(s)</div>
-                    </td>
-                    <td className="px-6 py-5 text-sm text-slate-400 font-medium">
-                      {formatCurrency(group.totalPrincipal)}
-                    </td>
-                    <td className="px-6 py-5 text-sm text-red-400 font-bold">
-                      +{formatCurrency(group.totalInterest)}
-                    </td>
-                    <td className="px-6 py-5 text-sm text-white font-black">
-                      {formatCurrency(group.totalDue)}
-                    </td>
-                    <td className="px-6 py-5">
-                      <span className={cn(
-                        "inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest border bg-red-500/10 text-red-400 border-red-500/20 shadow-sm shadow-red-500/10"
-                      )}>
-                        <AlertCircle className="w-3 h-3" />
-                        Account Delinquent
-                      </span>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
 
                   {/* Expanded content */}
                   {expandedPropId === group.property.id && (
@@ -639,10 +673,13 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
                             </thead>
                             <tbody className="divide-y divide-slate-800/50">
                               {(() => {
-                                const grouped = groupDelinquenciesByPenaltyRule(group.delinquencies, group.property.assessedValue);
-                                return grouped.map(row => {
+                                const bundled = groupDelinquenciesByPenaltyRule(group.delinquencies, group.property.assessedValue);
+                                return bundled.map(row => {
                                   // For actions, we still need a reference delinquency if it's a single year
                                   const baseDelinq = row.years.length === 1 ? group.delinquencies.find(d => d.year === row.years[0]) : null;
+
+                                  const itemStatus = row.records.some(r => r.status === "Delinquent" && !payments.some(p => p.propertyId === group.property.id && p.taxYear === r.year && p.status === "Active")) ? "Delinquent" : 
+                                                    (row.records.some(r => r.status === "Pending") ? "Pending" : "Paid");
 
                                   return (
                                     <tr key={`${row.ids.join(',')}-${row.quarterLabel || 'full'}`} className="hover:bg-white/[0.02]">
@@ -653,11 +690,11 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
                                       <td className="px-6 py-3">
                                         <span className={cn(
                                           "px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border",
-                                          row.years.some(y => group.delinquencies.find(d => d.year === y)?.status === "Delinquent") ? "bg-red-500/5 text-red-500 border-red-500/10" :
-                                          row.years.some(y => group.delinquencies.find(d => d.year === y)?.status === "Pending") ? "bg-amber-500/5 text-amber-500 border-amber-500/10" :
+                                          itemStatus === "Delinquent" ? "bg-red-500/5 text-red-500 border-red-500/10" :
+                                          itemStatus === "Pending" ? "bg-amber-500/5 text-amber-500 border-amber-500/10" :
                                           "bg-emerald-500/5 text-emerald-400 border-emerald-500/10"
                                         )}>
-                                          {row.years.length > 1 ? "Delinquent (Grouped)" : (group.delinquencies.find(d => d.year === row.years[0])?.status || "Delinquent")}
+                                          {row.years.length > 1 ? `${itemStatus} (Grouped)` : itemStatus}
                                         </span>
                                       </td>
                                     </tr>
@@ -666,12 +703,37 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
                               })()}
                             </tbody>
                           </table>
+                          {showNotice && (
+                            <div className="p-4 bg-red-950/20 border-t border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                                  <FileText className="w-4 h-4 text-red-400" />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <h5 className="text-[10px] font-black text-rose-300 uppercase tracking-widest">Notice of Delinquency Standard</h5>
+                                  <p className="text-[10px] text-slate-400 font-medium">Eligible for statutory demand notice. Outstanding real property liabilities span {outstandingPeriods} consecutive periods.</p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedPrintNotice(group);
+                                }}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border border-red-500 flex items-center gap-1.5 cursor-pointer shadow-lg shadow-red-900/20 active:scale-95"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                Print Demand Notice
+                              </button>
+                            </div>
+                          )}
                         </motion.div>
                       </td>
                     </tr>
                   )}
                 </React.Fragment>
-              ))}
+                );
+              })}
               
               {groupedDelinquencies.length === 0 && (
                 <tr>
@@ -696,6 +758,13 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
           onClose={() => setActiveDelinquency(null)}
           isEncoder={isEncoder}
           isAdmin={isAdmin}
+        />
+      )}
+      {selectedPrintNotice && (
+        <NoticeOfDelinquencyPrintView
+          property={selectedPrintNotice.property}
+          delinquencies={selectedPrintNotice.delinquencies}
+          onClose={() => setSelectedPrintNotice(null)}
         />
       )}
     </div>

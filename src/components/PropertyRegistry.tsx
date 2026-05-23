@@ -15,6 +15,7 @@ import {
   OperationType 
 } from "../lib/firebase";
 import { useAuth } from "../AuthContext";
+import { addToOfflineQueue } from "../lib/offlineSync";
 import { Property, PropertyClassification, Delinquency } from "../types";
 import { cn, formatCurrency } from "../lib/utils";
 import { DIPACULAO_BARANGAYS } from "../constants";
@@ -109,6 +110,101 @@ const PropertyRegistry: React.FC<{ isEncoder: boolean; isAdmin?: boolean }> = ({
         pin: formData.pin?.trim() || "",
         updatedAt: serverTimestamp()
       };
+
+      if (!navigator.onLine) {
+        const userName = profile?.username || profile?.displayName || "System";
+        const saveDataOffline: any = {
+          ...formData,
+          tdNumber: formData.tdNumber?.trim() || "",
+          pin: formData.pin?.trim() || "",
+          updatedAt: new Date().toISOString()
+        };
+
+        if (editingId) {
+          const oldVal = properties.find(p => p.id === editingId);
+          const { id: _, ...restData } = saveDataOffline;
+          
+          if (restData.isArchived === undefined) restData.isArchived = false;
+          if (!restData.recordedBy || restData.recordedBy === "System" || restData.recordedBy === "Imported") {
+            restData.recordedBy = userName;
+          }
+
+          addToOfflineQueue("UPDATE_PROPERTY", {
+            propertyId: editingId,
+            updateData: restData,
+            tdNumber: formData.tdNumber?.trim()
+          }, `Update Property TD: ${formData.tdNumber?.trim()} (Offline)`);
+
+          const mockNewProperty: Property = {
+            id: editingId,
+            ...formData,
+            tdNumber: formData.tdNumber?.trim() || "",
+            pin: formData.pin?.trim() || "",
+            isArchived: restData.isArchived,
+            recordedBy: restData.recordedBy,
+            createdAt: oldVal?.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          } as Property;
+          setProperties(prev => prev.map(p => p.id === editingId ? mockNewProperty : p));
+          setEditingId(null);
+        } else {
+          const { id: _, ...restData } = saveDataOffline;
+          const propertyPayload = {
+            ...restData,
+            isArchived: false,
+            recordedBy: userName,
+            createdAt: new Date().toISOString()
+          };
+
+          addToOfflineQueue("CREATE_PROPERTY", {
+            propertyData: propertyPayload,
+            recordedBy: userName
+          }, `Register Property TD: ${formData.tdNumber?.trim()} (Offline)`);
+
+          const mockNewProperty: Property = {
+            id: `offline_${Date.now()}`,
+            ...propertyPayload,
+            tdNumber: formData.tdNumber?.trim() || "",
+            pin: formData.pin?.trim() || ""
+          } as Property;
+          setProperties(prev => [mockNewProperty, ...prev]);
+          setIsAdding(false);
+        }
+
+        setFormData({
+          pin: "",
+          ownerName: "",
+          ownerAddress: "",
+          administratorName: "",
+          administratorAddress: "",
+          effectivityDate: new Date().getFullYear().toString(),
+          tdNumber: "",
+          detailedLocation: "",
+          street: "",
+          barangay: "",
+          municipality: "Dipaculao",
+          province: "Aurora",
+          lotNo: "",
+          blkNo: "",
+          octTct: "",
+          cctCloa: "",
+          classification: "LAND",
+          area: "",
+          assessedValue: 0,
+          previousTdNo: "",
+          previousOwner: "",
+          previousAssessedValue: 0,
+        });
+
+        setConfirmDialog({
+          isOpen: true,
+          title: "Offline Transaction Cached",
+          message: `The property declaration ${formData.tdNumber?.trim()} has been saved and cached in Offline Mode.\n\nThis entry will sync with the central server automatically when connection is restored.`,
+          onConfirm: () => {},
+          type: "success"
+        });
+        return;
+      }
 
       if (editingId) {
         const oldVal = properties.find(p => p.id === editingId);

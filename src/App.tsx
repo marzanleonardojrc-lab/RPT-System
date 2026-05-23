@@ -12,6 +12,7 @@ import CollectionModule from "./components/CollectionModule";
 import Login from "./components/Login";
 import ProfileModal from "./components/ProfileModal";
 import { AlertCircle } from "lucide-react";
+import OfflineSyncStatus from "./components/OfflineSyncStatus";
 
 const AppContent: React.FC = () => {
   const { user, profile, loading, logout, isAdmin, isEncoder, isOffline } = useAuth();
@@ -156,12 +157,7 @@ const AppContent: React.FC = () => {
       <main className="pl-64 min-h-screen bg-[radial-gradient(circle_at_top_right,_#1e293b,_transparent_40%)]">
         <header className="h-16 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 sticky top-0 z-10">
           <div className="flex items-center gap-4">
-            {isOffline && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full">
-                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">Offline Mode</span>
-              </div>
-            )}
+            <OfflineSyncStatus />
           </div>
           <div className="flex items-center gap-4">
             <div 

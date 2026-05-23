@@ -73,7 +73,7 @@ const Settings: React.FC = () => {
       isOpen: true,
       title: status === "Approved" ? "Grant System Access?" : "Reject Access Request?",
       message: status === "Approved" 
-        ? `You are about to VALIDATE ${user?.displayName} for system use. \n\nThey will be granted END-USER privileges by default. Proceed?`
+        ? `You are about to VALIDATE ${user?.displayName} for system use. \n\nThey will be granted USER privileges by default. Proceed?`
         : `You are about to DENY ${user?.displayName}'s request to join the system. \n\nThis action will prevent them from accessing any data nodes.`,
       type: status === "Approved" ? "success" : "danger",
       onConfirm: async () => {
@@ -81,7 +81,7 @@ const Settings: React.FC = () => {
           const old = users.find(u => u.uid === uid);
           await updateDoc(doc(db, "users", uid), { 
             status,
-            role: "End-User" // Default role upon approval
+            role: "User" // Default role upon approval
           });
           await logAudit("UPDATE", "UserStatus", uid, old, { status });
         } catch (err) {
@@ -172,12 +172,14 @@ const Settings: React.FC = () => {
                     <td className="px-6 py-4">
                       {user.status === "Approved" ? (
                         <select 
-                          className={`text-[10px] border border-slate-700 rounded-lg px-3 py-1.5 bg-slate-900 text-white font-bold uppercase tracking-widest outline-none focus:ring-1 focus:ring-indigo-500/50 cursor-pointer ${user.role === 'Admin' ? 'text-red-400 border-red-500/20' : 'text-indigo-400 border-indigo-500/20'}`}
-                          value={user.role || 'End-User'}
+                          className={`text-[10px] border border-slate-700 rounded-lg px-3 py-1.5 bg-slate-900 text-white font-bold uppercase tracking-widest outline-none focus:ring-1 focus:ring-indigo-500/50 cursor-pointer ${user.role === 'Admin' ? 'text-red-400 border-red-500/20' : user.role === 'Guest' ? 'text-slate-400 border-slate-500/20' : 'text-indigo-400 border-indigo-500/20'}`}
+                          value={user.role || 'User'}
                           onChange={(e) => updateRole(user.uid, e.target.value as UserRole)}
                         >
-                          <option value="End-User">End-User</option>
+                          <option value="User">User</option>
                           <option value="Admin">Admin</option>
+                          <option value="Guest">Guest</option>
+                          <option value="End-User" className="hidden">End-User</option>
                         </select>
                       ) : (
                         <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
@@ -212,7 +214,7 @@ const Settings: React.FC = () => {
                           {user.email !== profile?.email && user.uid && (
                             <div className="flex items-center gap-2">
                               <button
-                                onClick={() => updateRole(user.uid, user.role === 'Admin' ? 'End-User' : 'Admin')}
+                                onClick={() => updateRole(user.uid, user.role === 'Admin' ? 'User' : 'Admin')}
                                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border ${
                                   user.role === 'Admin' 
                                     ? 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500/20' 

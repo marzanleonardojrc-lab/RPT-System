@@ -22,6 +22,7 @@ import {
   where
 } from "./lib/firebase";
 import { updateProfile, updatePassword } from "firebase/auth";
+import { initializeAutoSync } from "./lib/offlineSync";
 
 interface AuthContextType {
   user: any | null;
@@ -37,6 +38,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   isAdmin: boolean;
   isEncoder: boolean;
+  isGuest: boolean;
   isOffline: boolean;
 }
 
@@ -46,7 +48,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isOffline, setIsOffline] = useState(false);
+  const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    const cleanupAutoSync = initializeAutoSync();
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      if (cleanupAutoSync) cleanupAutoSync();
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -89,7 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               email: firebaseUser.email || "",
               displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
               username: username,
-              role: (firebaseUser.email === "marzanleonardojrc@gmail.com" || firebaseUser.email === "marzan.leonardo04@gmail.com") ? "Admin" : "End-User",
+              role: (firebaseUser.email === "marzanleonardojrc@gmail.com" || firebaseUser.email === "marzan.leonardo04@gmail.com") ? "Admin" : "User",
               status: (firebaseUser.email === "marzanleonardojrc@gmail.com" || firebaseUser.email === "marzan.leonardo04@gmail.com") ? "Approved" : "Pending",
               createdAt: serverTimestamp()
             };
@@ -151,7 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email,
       displayName: name,
       username: username.toLowerCase(),
-      role: (email === "marzanleonardojrc@gmail.com" || email === "marzan.leonardo04@gmail.com") ? "Admin" : "End-User",
+      role: (email === "marzanleonardojrc@gmail.com" || email === "marzan.leonardo04@gmail.com") ? "Admin" : "User",
       status: (email === "marzanleonardojrc@gmail.com" || email === "marzan.leonardo04@gmail.com") ? "Approved" : "Pending",
       createdAt: serverTimestamp()
     };
@@ -265,7 +283,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logout,
       isOffline,
       isAdmin: (isApproved && profile?.role === "Admin") || isAdminEmail,
-      isEncoder: (isApproved && (profile?.role === "Admin" || profile?.role === "End-User")) || isAdminEmail
+      isEncoder: (isApproved && (profile?.role === "Admin" || profile?.role === "User" || profile?.role === "End-User")) || isAdminEmail,
+      isGuest: isApproved && profile?.role === "Guest" && !isAdminEmail
     }}>
       {children}
     </AuthContext.Provider>
