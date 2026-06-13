@@ -47,6 +47,20 @@ export default function CollectionModule() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedHistoryProperty, setSelectedHistoryProperty] = useState<Property | null>(null);
+
+  // Secure find, view, and void states
+  const [isReadOnlyForm, setIsReadOnlyForm] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
+
+  const [isVoidDialogOpen, setIsVoidDialogOpen] = useState(false);
+  const [voidUsername, setVoidUsername] = useState("");
+  const [voidPassword, setVoidPassword] = useState("");
+  const [voidReason, setVoidReason] = useState("");
+  const [isVoiding, setIsVoiding] = useState(false);
+  const [voidError, setVoidError] = useState("");
   
   // Modal Form State
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
@@ -118,8 +132,10 @@ export default function CollectionModule() {
   useEffect(() => {
     if (propSearch.length > 1 && propSearch !== selectedProperty?.tdNumber) {
       const results = properties.filter(p => 
-        p.tdNumber.toLowerCase().includes(propSearch.toLowerCase()) ||
-        p.ownerName.toLowerCase().includes(propSearch.toLowerCase())
+        !p.isArchived && (
+          p.tdNumber.toLowerCase().includes(propSearch.toLowerCase()) ||
+          p.ownerName.toLowerCase().includes(propSearch.toLowerCase())
+        )
       ).slice(0, 5);
       setPropSearchResults(results);
     } else {
@@ -526,6 +542,209 @@ export default function CollectionModule() {
   const [activeActionDelinq, setActiveActionDelinq] = useState<Delinquency | null>(null);
   const [actionTab, setActionTab] = useState<"audit" | "void">("audit");
 
+  useEffect(() => {
+    if (!isSearchModalOpen) return;
+    
+    setIsSearchLoading(true);
+    const paymentsRef = collection(db, "payments");
+    const unsub = onSnapshot(paymentsRef, (snapshot) => {
+      const allPmts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const matched = allPmts.filter((p: any) => {
+        if (p.status === "VOID" || p.status === "Voided") return false;
+
+        const ownerName = (p.payerName || "").toLowerCase();
+        const orNum = (p.orNumber || "").toLowerCase();
+        const prop = properties.find(prop => prop.id === p.propertyId);
+        if (!prop || prop.isArchived) return false;
+        
+        const tdn = (prop?.tdNumber || "").toLowerCase();
+
+        const q = searchQuery.toLowerCase().trim();
+        return orNum.includes(q) || tdn.includes(q) || ownerName.includes(q);
+      });
+      
+      const groupedPmts: Record<string, any> = {};
+      matched.forEach((p: any) => {
+        if (!groupedPmts[p.orNumber]) {
+          groupedPmts[p.orNumber] = {
+            ...p,
+            years: [p.taxYear],
+            totalAmount: p.amountPaid
+          };
+        } else {
+          if (!groupedPmts[p.orNumber].years.includes(p.taxYear)) {
+            groupedPmts[p.orNumber].years.push(p.taxYear);
+          }
+          groupedPmts[p.orNumber].totalAmount += p.amountPaid;
+        }
+      });
+
+      setSearchResults(Object.values(groupedPmts));
+      setIsSearchLoading(false);
+    }, (error) => {
+      console.error("Failed to fetch payments:", error);
+      setIsSearchLoading(false);
+    });
+
+    return () => unsub();
+  }, [isSearchModalOpen, searchQuery, properties]);
+
+  const handleSelectReceipt = async (paymentRecord: any) => {
+    setIsReadOnlyForm(true);
+    const prop = properties.find(p => p.id === paymentRecord.propertyId);
+    if (prop) {
+      setSelectedProperty(prop);
+      setPropSearch(prop.tdNumber);
+    }
+    setOrNumber(paymentRecord.orNumber);
+    setOrDate(paymentRecord.paymentDate);
+    setTaxPayer(paymentRecord.payerName);
+    setTreasurer(paymentRecord.treasurer || "");
+    setDeputy(paymentRecord.deputy || "");
+    
+    if (paymentRecord.paymentType && paymentRecord.paymentType.startsWith("Installment")) {
+      setPaymentMode("Installment");
+      const match = paymentRecord.paymentType.match(/\(([^)]+)\)/);
+      if (match) {
+        setQuarters(match[1].split(",").map((q: string) => q.trim()));
+      } else {
+        setQuarters([]);
+      }
+    } else {
+      setPaymentMode("Full");
+      setQuarters([]);
+    }
+    
+    setIsAdvance(paymentRecord.isAdvance || false);
+    setIsCash(paymentRecord.settlementMethod === "Cash");
+    setIsCheck(paymentRecord.settlementMethod === "Check");
+    if (paymentRecord.checkDetails) {
+      setCheckNumber(paymentRecord.checkDetails.number || "");
+      setCheckPayee(paymentRecord.checkDetails.payee || "");
+      setCheckDate(paymentRecord.checkDetails.date || "");
+    } else {
+      setCheckNumber("");
+      setCheckPayee("");
+      setCheckDate(new Date().toISOString().split('T')[0]);
+    }
+    setCashTendered(paymentRecord.amountPaid || 0);
+
+    try {
+      const pmtsSnap = await getDocs(query(
+        collection(db, "payments"),
+        where("orNumber", "==", paymentRecord.orNumber)
+      ));
+      const paymentList = pmtsSnap.docs.map(doc => doc.data());
+      const delinquencyIds = paymentList.map(p => p.delinquencyId);
+      
+      const delinqsList: Delinquency[] = [];
+      for (const id of delinquencyIds) {
+        if (id) {
+          const dSnap = await getDocs(query(collection(db, "delinquencies"), where("id", "==", id)));
+          dSnap.forEach(docDoc => {
+            delinqsList.push({ id: docDoc.id, ...docDoc.data() } as Delinquency);
+          });
+        }
+      }
+      
+      if (delinqsList.length === 0) {
+        paymentList.forEach((p: any) => {
+          delinqsList.push({
+            id: p.delinquencyId || p.orNumber + "-" + p.taxYear,
+            propertyId: p.propertyId,
+            year: p.taxYear,
+            basicTaxDue: p.basicPaid || 0,
+            sefTaxDue: p.sefPaid || 0,
+            penalty: p.penaltyPaid || 0,
+            interest: p.penaltyPaid || 0,
+            totalDue: p.amountPaid || 0,
+            totalPaid: p.amountPaid || 0,
+            status: "Paid"
+          } as unknown as Delinquency);
+        });
+      }
+
+      setFormDelinquencies(delinqsList.sort((a, b) => a.year - b.year));
+      setSelectedDelinqIds(new Set(delinqsList.map(d => d.id)));
+    } catch (e) {
+      console.error("Error loading delinquencies for record:", e);
+    }
+    setIsSearchModalOpen(false);
+  };
+
+  const handleVoidRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVoidError("");
+    setIsVoiding(true);
+
+    if (!voidUsername.trim()) {
+      setVoidError("Admin Username/Email is required.");
+      setIsVoiding(false);
+      return;
+    }
+    if (!voidPassword) {
+      setVoidError("Admin Password is required.");
+      setIsVoiding(false);
+      return;
+    }
+    if (!voidReason.trim()) {
+      setVoidError("Reason for voiding is required.");
+      setIsVoiding(false);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/payments/invalidate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          adminEmail: voidUsername.trim(),
+          adminPassword: voidPassword,
+          orNumber: orNumber.trim(),
+          reason: voidReason.trim()
+        })
+      });
+
+      const responseText = await response.text();
+      let data: any = null;
+      
+      try {
+        data = JSON.parse(responseText);
+      } catch (jsonErr) {
+        if (!response.ok) {
+          throw new Error(`Server returned error status ${response.status}: ${responseText.substring(0, 200)}`);
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to void payment record.");
+      }
+
+      setIsVoidDialogOpen(false);
+      setVoidUsername("");
+      setVoidPassword("");
+      setVoidReason("");
+      
+      setErrorDialog({
+        isOpen: true,
+        title: "Record Voided Successfully",
+        message: `The payment record for O.R. Number ${orNumber} has been successfully voided and audited. All associated delinquencies have been reset to active.`,
+        type: "success"
+      });
+
+      setIsReadOnlyForm(false);
+      setIsPosting(false);
+      resetForm();
+    } catch (err: any) {
+      console.error(err);
+      setVoidError(err.message || "An unexpected error occurred during voiding.");
+    } finally {
+      setIsVoiding(false);
+    }
+  };
+
   const resetForm = () => {
     setSelectedProperty(null);
     setFormDelinquencies([]);
@@ -540,13 +759,14 @@ export default function CollectionModule() {
     setIsCash(true);
     setIsCheck(false);
     setIsAdvance(false);
+    setIsReadOnlyForm(false);
   };
 
   const groupedPaid = React.useMemo(() => {
     const groups: Record<string, any> = {};
     delinquencies.forEach(d => {
       const prop = properties.find(p => p.id === d.propertyId);
-      if (!prop) return;
+      if (!prop || prop.isArchived) return;
 
       const searchStr = `${prop.ownerName} ${prop.tdNumber} ${d.year}`.toLowerCase();
       if (!searchStr.includes(searchTerm.toLowerCase())) return;
@@ -748,72 +968,74 @@ export default function CollectionModule() {
                       type="text" 
                       value={orNumber}
                       onChange={e => setOrNumber(e.target.value)}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      disabled={isSubmitting || isReadOnlyForm}
+                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
                       placeholder="Receipt Number..."
                     />
                   </div>
                   <div className="row-span-2 h-[72px] p-2 bg-slate-950 border border-slate-800 rounded-lg flex flex-col relative group">
                      <div className="flex items-center justify-between border-b border-slate-800/50 pb-0.5 mb-1.5">
                        <label className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest block">Payment Mode</label>
-                       <label className="flex items-center gap-1.5 cursor-pointer">
+                       <label className={cn("flex items-center gap-1.5", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
                          <input 
                            type="checkbox" 
                            checked={isAdvance}
                            onChange={e => setIsAdvance(e.target.checked)}
-                           className="w-2.5 h-2.5 accent-emerald-500 rounded-sm"
+                           disabled={isSubmitting || isReadOnlyForm}
+                           className="w-2.5 h-2.5 accent-emerald-500 rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
                          />
                          <span className={cn("text-[7px] font-black uppercase tracking-tighter transition-colors", isAdvance ? "text-emerald-400" : "text-slate-600")}>Advance Payment (20%)</span>
                        </label>
                      </div>
                      <div className="grid grid-cols-3 grid-rows-2 gap-x-4 gap-y-1.5 flex-1 items-center">
                        {/* ROW 1 */}
-                       <label className="flex items-center gap-2 cursor-pointer group">
-                         <input type="radio" checked={paymentMode === "Full"} onChange={() => setPaymentMode("Full")} className="w-3 h-3 accent-indigo-500" />
+                       <label className={cn("flex items-center gap-2 group", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
+                         <input type="radio" checked={paymentMode === "Full"} onChange={() => setPaymentMode("Full")} disabled={isSubmitting || isReadOnlyForm} className="w-3 h-3 accent-indigo-500 disabled:opacity-50" />
                          <span className="text-[9px] font-bold text-slate-300 group-hover:text-white transition-colors">Full</span>
                        </label>
-                       <label className={cn("flex items-center gap-2 transition-all", paymentMode === "Full" ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
+                       <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
                          <input 
                            type="checkbox" 
                            checked={quarters.includes("1st Qtr")}
-                           disabled={paymentMode === "Full"}
+                           disabled={paymentMode === "Full" || isReadOnlyForm}
                            onChange={e => handleQuarterToggle("1st Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-indigo-500" 
+                           className="w-2.5 h-2.5 accent-indigo-500 disabled:opacity-50" 
                          />
                          <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">1st quarter</span>
                        </label>
-                       <label className={cn("flex items-center gap-2 transition-all", paymentMode === "Full" ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
+                       <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
                          <input 
                            type="checkbox" 
                            checked={quarters.includes("3rd Qtr")}
-                           disabled={paymentMode === "Full"}
+                           disabled={paymentMode === "Full" || isReadOnlyForm}
                            onChange={e => handleQuarterToggle("3rd Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-indigo-500" 
+                           className="w-2.5 h-2.5 accent-indigo-500 disabled:opacity-50" 
                          />
                          <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">3rd quarter</span>
                        </label>
 
                        {/* ROW 2 */}
-                       <label className="flex items-center gap-2 cursor-pointer group">
-                         <input type="radio" checked={paymentMode === "Installment"} onChange={() => setPaymentMode("Installment")} className="w-3 h-3 accent-indigo-500" />
+                       <label className={cn("flex items-center gap-2 group", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
+                         <input type="radio" checked={paymentMode === "Installment"} onChange={() => setPaymentMode("Installment")} disabled={isSubmitting || isReadOnlyForm} className="w-3 h-3 accent-indigo-500 disabled:opacity-50" />
                          <span className="text-[9px] font-bold text-slate-300 group-hover:text-white transition-colors">Installment</span>
                        </label>
-                       <label className={cn("flex items-center gap-2 transition-all", paymentMode === "Full" ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
+                       <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
                          <input 
                            type="checkbox" 
                            checked={quarters.includes("2nd Qtr")}
-                           disabled={paymentMode === "Full"}
+                           disabled={paymentMode === "Full" || isReadOnlyForm}
                            onChange={e => handleQuarterToggle("2nd Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-indigo-500" 
+                           className="w-2.5 h-2.5 accent-indigo-500 disabled:opacity-50" 
                          />
                          <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">2nd quarter</span>
                        </label>
-                       <label className={cn("flex items-center gap-2 transition-all", paymentMode === "Full" ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
+                       <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
                          <input 
                            type="checkbox" 
                            checked={quarters.includes("4th Qtr")}
-                           disabled={paymentMode === "Full"}
+                           disabled={paymentMode === "Full" || isReadOnlyForm}
                            onChange={e => handleQuarterToggle("4th Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-indigo-500" 
+                           className="w-2.5 h-2.5 accent-indigo-500 disabled:opacity-50" 
                          />
                          <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">4th quarter</span>
                        </label>
@@ -827,7 +1049,8 @@ export default function CollectionModule() {
                       type="date" 
                       value={orDate}
                       onChange={e => setOrDate(e.target.value)}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      disabled={isReadOnlyForm}
+                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
                     />
                   </div>
 
@@ -855,7 +1078,8 @@ export default function CollectionModule() {
                         type="text" 
                         value={propSearch}
                         onChange={e => setPropSearch(e.target.value)}
-                        className="w-full h-8 bg-slate-950 border border-slate-800 rounded-lg pl-3 pr-8 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                        disabled={isReadOnlyForm}
+                        className="w-full h-8 bg-slate-950 border border-slate-800 rounded-lg pl-3 pr-8 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
                         placeholder="Search property..."
                       />
                       <Search className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -911,7 +1135,8 @@ export default function CollectionModule() {
                       type="text" 
                       value={taxPayer}
                       onChange={e => setTaxPayer(e.target.value)}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      disabled={isReadOnlyForm}
+                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
                     />
                   </div>
                   <div className="grid grid-cols-3 gap-2 items-center h-8">
@@ -928,7 +1153,8 @@ export default function CollectionModule() {
                       type="text" 
                       value={treasurer}
                       onChange={e => setTreasurer(e.target.value)}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      disabled={isReadOnlyForm}
+                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
                     />
                   </div>
                   <div className="grid grid-cols-3 gap-2 items-center h-8">
@@ -937,7 +1163,8 @@ export default function CollectionModule() {
                       type="text" 
                       value={deputy}
                       onChange={e => setDeputy(e.target.value)}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      disabled={isReadOnlyForm}
+                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
                     />
                   </div>
                 </div>
@@ -968,7 +1195,7 @@ export default function CollectionModule() {
                               <input 
                                 type="checkbox" 
                                 checked={isSelected}
-                                disabled={paymentMode === "Full"}
+                                disabled={paymentMode === "Full" || isReadOnlyForm}
                                 onChange={e => {
                                    const next = new Set(selectedDelinqIds);
                                    if (e.target.checked) row.ids.forEach((id: string) => next.add(id));
@@ -1042,7 +1269,8 @@ export default function CollectionModule() {
                                 type="number" 
                                 value={cashTendered || ""}
                                 onChange={e => setCashTendered(parseFloat(e.target.value) || 0)}
-                                className="w-full h-10 bg-slate-950 border border-indigo-500/30 rounded-lg pl-7 pr-3 text-lg font-black text-white focus:border-indigo-500 outline-none transition-all shadow-lg shadow-indigo-600/5 transition-all"
+                                disabled={isReadOnlyForm}
+                                className="w-full h-10 bg-slate-950 border border-indigo-500/30 rounded-lg pl-7 pr-3 text-lg font-black text-white focus:border-indigo-500 outline-none transition-all shadow-lg shadow-indigo-600/5 transition-all disabled:opacity-75 disabled:cursor-not-allowed"
                                 placeholder="0.00"
                               />
                            </div>
@@ -1062,20 +1290,22 @@ export default function CollectionModule() {
                        <div className="space-y-3 flex-1 flex flex-col">
                          <div className="flex gap-4">
                            <button 
-                             onClick={() => { setIsCash(true); setIsCheck(false); }}
+                             type="button" disabled={isReadOnlyForm} onClick={() => { if (!isReadOnlyForm) { setIsCash(true); setIsCheck(false); } }}
                              className={cn(
                                "flex-1 p-2 rounded-lg border flex items-center justify-center gap-2 transition-all",
-                               isCash ? "bg-indigo-600/10 border-indigo-500 text-indigo-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700"
+                               isCash ? "bg-indigo-600/10 border-indigo-500 text-indigo-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
+                               isReadOnlyForm && "opacity-50 cursor-not-allowed"
                              )}
                            >
                              <div className={cn("w-3 h-3 rounded-full border-2", isCash ? "bg-indigo-500 border-indigo-400" : "border-slate-700")} />
                              <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Cash Settlement</span>
                            </button>
                            <button 
-                             onClick={() => { setIsCash(false); setIsCheck(true); }}
+                             type="button" disabled={isReadOnlyForm} onClick={() => { if (!isReadOnlyForm) { setIsCash(false); setIsCheck(true); } }}
                              className={cn(
                                "flex-1 p-2 rounded-lg border flex items-center justify-center gap-2 transition-all",
-                               isCheck ? "bg-indigo-600/10 border-indigo-500 text-indigo-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700"
+                               isCheck ? "bg-indigo-600/10 border-indigo-500 text-indigo-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
+                               isReadOnlyForm && "opacity-50 cursor-not-allowed"
                              )}
                            >
                              <div className={cn("w-3 h-3 rounded-full border-2", isCheck ? "bg-indigo-500 border-indigo-400" : "border-slate-700")} />
@@ -1092,9 +1322,9 @@ export default function CollectionModule() {
                              <input 
                                type="text" 
                                value={checkNumber}
-                               disabled={!isCheck}
+                               disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckNumber(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none"
+                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                                placeholder="Enter No..."
                              />
                            </div>
@@ -1103,9 +1333,9 @@ export default function CollectionModule() {
                              <input 
                                type="date" 
                                value={checkDate}
-                               disabled={!isCheck}
+                               disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckDate(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none"
+                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                              />
                            </div>
                            <div className="col-span-2 space-y-1">
@@ -1113,9 +1343,9 @@ export default function CollectionModule() {
                              <input 
                                type="text" 
                                value={checkPayee}
-                               disabled={!isCheck}
+                               disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckPayee(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none"
+                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                                placeholder="Payee Name..."
                              />
                            </div>
@@ -1130,7 +1360,21 @@ export default function CollectionModule() {
               <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-3" />
                 <div className="flex gap-2">
+                  {!isReadOnlyForm && (
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsSearchModalOpen(true);
+                        setSearchQuery("");
+                        setSearchResults([]);
+                      }}
+                      className="px-6 h-8 text-[9px] font-black uppercase tracking-widest text-slate-300 hover:bg-slate-800 rounded-lg transition-all border border-slate-800 bg-slate-900"
+                    >
+                      Find
+                    </button>
+                  )}
                   <button 
+                    type="button"
                     onClick={() => {
                       setIsPosting(false);
                       resetForm();
@@ -1139,18 +1383,31 @@ export default function CollectionModule() {
                   >
                     Cancel
                   </button>
-                  <button 
-                    onClick={handlePostPayment}
-                    disabled={isSubmitting}
-                    className={cn(
-                      "px-8 h-8 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all shadow-xl font-black",
-                      isSubmitting 
-                        ? "bg-slate-800 text-slate-500 cursor-not-allowed" 
-                        : "bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30"
-                    )}
-                  >
-                    {isSubmitting ? "Posting..." : "Post Payment Record"}
-                  </button>
+                  {isReadOnlyForm ? (
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsVoidDialogOpen(true);
+                      }}
+                      className="px-6 h-8 text-[9px] font-black uppercase tracking-widest text-red-500 bg-red-950/20 hover:bg-red-950/40 rounded-lg transition-all border border-red-500/30"
+                    >
+                      Void Record
+                    </button>
+                  ) : (
+                    <button 
+                      type="button"
+                      onClick={handlePostPayment}
+                      disabled={isSubmitting}
+                      className={cn(
+                        "px-8 h-8 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all shadow-xl font-black",
+                        isSubmitting 
+                          ? "bg-slate-800 text-slate-500 cursor-not-allowed" 
+                          : "bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30"
+                      )}
+                    >
+                      {isSubmitting ? "Posting..." : "Post Payment Record"}
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -1164,6 +1421,202 @@ export default function CollectionModule() {
             property={selectedHistoryProperty}
             onClose={() => setSelectedHistoryProperty(null)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* MODAL 1: SEARCH POSTED RECEIPTS */}
+      <AnimatePresence>
+        {isSearchModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[85vh] overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+                <div>
+                  <h3 className="text-base font-bold text-white tracking-tight font-sans">Search Posted Receipts</h3>
+                  <p className="text-xs text-slate-500 mt-0.5 font-sans">Find validated payments by O.R. Number, TDN, or Name to view details or void records.</p>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setIsSearchModalOpen(false)}
+                  className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 border-b border-slate-800 bg-slate-900/40">
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                  <input 
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Enter O.R. Number, Tax Declaration Number (TDN), or Payer's Name..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none transition-all font-sans"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5">
+                {isSearchLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-3">
+                    <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-slate-500 text-xs font-medium font-sans animate-pulse">Searching ledger...</p>
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <div className="text-center py-20 text-slate-500 italic text-xs font-sans">
+                    No matching posted active payment receipts found in the archive folder.
+                  </div>
+                ) : (
+                  <div className="border border-slate-850 rounded-xl overflow-hidden bg-slate-950/20">
+                    <table className="w-full text-left text-xs font-sans">
+                      <thead className="bg-slate-950 text-slate-500 font-bold border-b border-slate-850">
+                        <tr>
+                          <th className="px-4 py-3 text-[10px] tracking-widest uppercase">O.R. Number</th>
+                          <th className="px-4 py-3 text-[10px] tracking-widest uppercase">Payer / Taxpayer</th>
+                          <th className="px-4 py-3 text-[10px] tracking-widest uppercase">Years Paid</th>
+                          <th className="px-4 py-3 text-[10px] tracking-widest uppercase text-right">Total Amount</th>
+                          <th className="px-4 py-3 text-[10px] tracking-widest uppercase text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-850 text-slate-300">
+                        {searchResults.map((p) => (
+                          <tr key={p.id} className="hover:bg-slate-850/40 transition-colors font-medium">
+                            <td className="px-4 py-3 font-mono font-bold text-indigo-400">{p.orNumber}</td>
+                            <td className="px-4 py-3 font-semibold text-slate-200">{p.payerName || "—"}</td>
+                            <td className="px-4 py-3 text-slate-400">
+                              {p.years?.join(", ") || p.taxYear}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono text-emerald-400 font-bold">
+                              ₱{p.totalAmount ? p.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (p.amountPaid || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleSelectReceipt(p)}
+                                className="px-3 py-1 bg-indigo-600/15 text-indigo-400 hover:bg-indigo-600 hover:text-white border border-indigo-500/20 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all font-sans cursor-pointer"
+                              >
+                                View Record
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL 2: VOID CONFIRMATION DIALOG */}
+      <AnimatePresence>
+        {isVoidDialogOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-[120] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-800 flex items-center gap-3 bg-red-950/20">
+                <div className="w-10 h-10 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center border border-red-500/20">
+                  <AlertCircle className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white tracking-tight font-sans">Void Payment Receipt</h3>
+                  <p className="text-xs text-slate-500 mt-0.5 font-mono">O.R. Number: <span className="text-red-400 font-bold">{orNumber}</span></p>
+                </div>
+              </div>
+
+              <form onSubmit={handleVoidRecord} className="p-5 space-y-4">
+                <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                  Warning: Voiding is irreversible. This will invalidate the selected payment ledger records and unlock all attached delinquency balances for active reassessment.
+                </p>
+
+                {voidError && (
+                  <div className="p-3 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl text-xs flex items-center gap-2 font-sans font-medium">
+                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full shrink-0" />
+                    <span>{voidError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-sans">Admin Email Address</label>
+                  <input 
+                    type="email"
+                    value={voidUsername}
+                    onChange={(e) => setVoidUsername(e.target.value)}
+                    placeholder="Enter Admin email address..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:border-red-500 outline-none transition-all font-sans"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-sans">Admin Clearance Password</label>
+                  <input 
+                    type="password"
+                    value={voidPassword}
+                    onChange={(e) => setVoidPassword(e.target.value)}
+                    placeholder="Enter Admin password..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:border-red-500 outline-none transition-all font-sans"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-sans">Justification Reason for Voiding</label>
+                  <textarea 
+                    rows={3}
+                    value={voidReason}
+                    onChange={(e) => setVoidReason(e.target.value)}
+                    placeholder="Describe why this transaction is being voided (clerical indexing errors, returned check)..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:border-red-500 outline-none transition-all resize-none font-sans"
+                    required
+                  />
+                </div>
+
+                <div className="flex gap-2 justify-end pt-2 border-t border-slate-850">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setIsVoidDialogOpen(false);
+                      setVoidError("");
+                    }}
+                    className="px-5 h-8 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-800 rounded-lg transition-all border border-slate-800 font-sans cursor-pointer"
+                    disabled={isVoiding}
+                  >
+                    Abort
+                  </button>
+                  <button 
+                    type="submit"
+                    className="px-6 h-8 text-[10px] font-black uppercase tracking-widest text-white bg-red-600 hover:bg-red-500 rounded-lg transition-all shadow-xl shadow-red-600/20 font-sans cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isVoiding}
+                  >
+                    {isVoiding ? "Verifying..." : "Confirm & Void"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 

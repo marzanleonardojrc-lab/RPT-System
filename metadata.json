@@ -2,5 +2,5 @@
   "name": "RPT Delinquency Tracker",
   "description": "A comprehensive web-based application for monitoring Real Property Tax delinquencies, featuring automated penalty computation, COA-compliant reporting, and a secure multi-user environment.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -58,8 +58,10 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean }> = ({ i
       return;
     }
     const filtered = properties.filter(p => 
-      p.tdNumber.toLowerCase().includes(propertySearch.toLowerCase()) ||
-      p.ownerName.toLowerCase().includes(propertySearch.toLowerCase())
+      !p.isArchived && (
+        p.tdNumber.toLowerCase().includes(propertySearch.toLowerCase()) ||
+        p.ownerName.toLowerCase().includes(propertySearch.toLowerCase())
+      )
     ).slice(0, 5); // Limit to top 5 results for clarity
     setPropertySearchResults(filtered);
   }, [propertySearch, properties]);

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { UserProfile } from "./types";
+import { UserProfile, UserRole } from "./types";
 import { 
   auth, 
   db, 
@@ -24,13 +24,19 @@ import {
 import { updateProfile, updatePassword } from "firebase/auth";
 import { initializeAutoSync } from "./lib/offlineSync";
 
+const createAuthError = (code: string, message?: string) => {
+  const err = new Error(message || code) as any;
+  err.code = code;
+  return err;
+};
+
 interface AuthContextType {
   user: any | null;
   profile: UserProfile | null;
   loading: boolean;
   signIn: () => Promise<void>;
   signInWithEmail: (emailOrUsername: string, pass: string) => Promise<void>;
-  signUpWithEmail: (email: string, pass: string, name: string, username: string) => Promise<void>;
+  signUpWithEmail: (email: string, pass: string, name: string, username: string, role?: UserRole, linkedPropertyIds?: string[]) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   updateUserName: (name: string) => Promise<void>;
   updateUserUsername: (username: string) => Promise<void>;
@@ -39,6 +45,7 @@ interface AuthContextType {
   isAdmin: boolean;
   isEncoder: boolean;
   isGuest: boolean;
+  isTaxpayer: boolean;
   isOffline: boolean;
 }
 
@@ -150,29 +157,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!snap.empty) {
         emailToUse = snap.docs[0].data().email;
       } else {
-        throw new Error("auth/user-not-found");
+        throw createAuthError("auth/user-not-found");
       }
     }
     await signInWithEmailAndPassword(auth, emailToUse, pass);
   };
 
-  const signUpWithEmail = async (email: string, pass: string, name: string, username: string) => {
+  const signUpWithEmail = async (email: string, pass: string, name: string, username: string, targetRole: UserRole = "User", linkedPropertyIds?: string[]) => {
     const q = query(collection(db, "user_mappings"), where("username", "==", username.toLowerCase()));
     const snap = await getDocs(q);
     if (!snap.empty) {
-      throw new Error("auth/username-already-in-use");
+      throw createAuthError("auth/username-already-in-use");
     }
 
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    const isAdminEmail = email === "marzanleonardojrc@gmail.com" || email === "marzan.leonardo04@gmail.com";
+    const assignedRole = isAdminEmail ? "Admin" : targetRole;
+    const assignedStatus = (isAdminEmail || targetRole === "Taxpayer") ? "Approved" : "Pending";
+
     const newProfile: any = {
       uid: cred.user.uid,
       email,
       displayName: name,
       username: username.toLowerCase(),
-      role: (email === "marzanleonardojrc@gmail.com" || email === "marzan.leonardo04@gmail.com") ? "Admin" : "User",
-      status: (email === "marzanleonardojrc@gmail.com" || email === "marzan.leonardo04@gmail.com") ? "Approved" : "Pending",
+      role: assignedRole,
+      status: assignedStatus,
       createdAt: serverTimestamp()
     };
+    if (linkedPropertyIds) {
+      newProfile.linkedPropertyIds = linkedPropertyIds;
+    }
     await setDoc(doc(db, "users", cred.user.uid), newProfile);
     await setDoc(doc(db, "user_mappings", username.toLowerCase()), {
       username: username.toLowerCase(),
@@ -205,7 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error(`getDocs user_mappings: ${err.message}`);
     }
     if (!snap.empty && snap.docs[0].id !== formattedUsername) {
-      throw new Error("auth/username-already-in-use");
+      throw createAuthError("auth/username-already-in-use");
     }
 
     // Delete old mapping if exists
@@ -253,7 +267,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!snap.empty) {
         emailToUse = snap.docs[0].data().email;
       } else {
-        throw new Error("auth/user-not-found");
+        throw createAuthError("auth/user-not-found");
       }
     }
     await sendPasswordResetEmail(auth, emailToUse);
@@ -284,7 +298,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isOffline,
       isAdmin: (isApproved && profile?.role === "Admin") || isAdminEmail,
       isEncoder: (isApproved && (profile?.role === "Admin" || profile?.role === "User" || profile?.role === "End-User")) || isAdminEmail,
-      isGuest: isApproved && profile?.role === "Guest" && !isAdminEmail
+      isGuest: isApproved && profile?.role === "Guest" && !isAdminEmail,
+      isTaxpayer: profile?.role === "Taxpayer" || profile?.role === "Resident"
     }}>
       {children}
     </AuthContext.Provider>

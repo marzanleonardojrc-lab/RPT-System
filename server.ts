@@ -1,6 +1,4 @@
 import express, { type Response, type NextFunction } from "express";
-import admin from "firebase-admin";
-import { getFirestore } from "firebase-admin/firestore";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -12,8 +10,21 @@ import { readFileSync } from "fs";
 
 console.log("--- Server Starting ---");
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+let __filename = "";
+let __dirname = "";
+
+try {
+  if (typeof import.meta !== "undefined" && import.meta.url) {
+    __filename = fileURLToPath(import.meta.url);
+    __dirname = path.dirname(__filename);
+  } else {
+    __dirname = process.cwd();
+    __filename = path.join(__dirname, "server.ts");
+  }
+} catch {
+  __dirname = process.cwd();
+  __filename = path.join(__dirname, "server.ts");
+}
 
 // Read config safely
 const firebaseConfig = JSON.parse(readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
@@ -21,46 +32,363 @@ const firebaseConfig = JSON.parse(readFileSync(path.join(__dirname, "firebase-ap
 const JWT_SECRET = process.env.JWT_SECRET || "rpt-local-secret-key-12345";
 const adminEmail = "marzanleonardojrc@gmail.com";
 
-// --- Firebase Admin Configuration ---
-if (admin.apps.length === 0) {
-  admin.initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
+// --- REST-based Firestore Implementation ---
+
+function fromFirestoreValue(valueObj: any): any {
+  if (!valueObj) return undefined;
+  if ("stringValue" in valueObj) return valueObj.stringValue;
+  if ("doubleValue" in valueObj) return Number(valueObj.doubleValue);
+  if ("integerValue" in valueObj) return Number(valueObj.integerValue);
+  if ("booleanValue" in valueObj) return valueObj.booleanValue;
+  if ("nullValue" in valueObj) return null;
+  if ("timestampValue" in valueObj) return valueObj.timestampValue;
+  if ("mapValue" in valueObj) {
+    const mapFields = valueObj.mapValue.fields || {};
+    const res: any = {};
+    for (const k of Object.keys(mapFields)) {
+      res[k] = fromFirestoreValue(mapFields[k]);
+    }
+    return res;
+  }
+  if ("arrayValue" in valueObj) {
+    const list = valueObj.arrayValue.values || [];
+    return list.map((item: any) => fromFirestoreValue(item));
+  }
+  return valueObj;
 }
 
-// Get Firestore instance.
-const dbId = firebaseConfig.firestoreDatabaseId;
-const db = (dbId && dbId !== "(default)") ? getFirestore(dbId) : getFirestore();
-console.log(`Using Firestore Database ${dbId && dbId !== "(default)" ? `ID: ${dbId}` : "Default"}`);
+function fromFirestoreObj(doc: any): any {
+  if (!doc || !doc.fields) return {};
+  const res: any = {};
+  for (const k of Object.keys(doc.fields)) {
+    res[k] = fromFirestoreValue(doc.fields[k]);
+  }
+  return res;
+}
+
+function toFirestoreValue(val: any): any {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === "string") return { stringValue: val };
+  if (typeof val === "boolean") return { booleanValue: val };
+  if (typeof val === "number") {
+    if (Number.isInteger(val)) return { integerValue: String(val) };
+    return { doubleValue: val };
+  }
+  if (Array.isArray(val)) {
+    return {
+      arrayValue: {
+        values: val.map(toFirestoreValue)
+      }
+    };
+  }
+  if (typeof val === "object") {
+    const fields: any = {};
+    for (const k of Object.keys(val)) {
+      fields[k] = toFirestoreValue(val[k]);
+    }
+    return {
+      mapValue: { fields }
+    };
+  }
+  return { stringValue: String(val) };
+}
+
+function toFirestoreDocBody(obj: any): any {
+  const fields: any = {};
+  for (const k of Object.keys(obj)) {
+    fields[k] = toFirestoreValue(obj[k]);
+  }
+  return { fields };
+}
+
+class RESTQuery {
+  private colName: string;
+  private filters: any[] = [];
+  private limitVal?: number;
+  private orderField?: string;
+  private orderDir?: "ASCENDING" | "DESCENDING";
+  private token?: string;
+
+  constructor(colName: string, token?: string) {
+    this.colName = colName;
+    this.token = token;
+  }
+
+  where(field: string, op: string, value: any) {
+    let restOp = "EQUAL";
+    if (op === "==") restOp = "EQUAL";
+    else if (op === "<") restOp = "LESS_THAN";
+    else if (op === "<=") restOp = "LESS_THAN_OR_EQUAL";
+    else if (op === ">") restOp = "GREATER_THAN";
+    else if (op === ">=") restOp = "GREATER_THAN_OR_EQUAL";
+    else if (op === "array-contains") restOp = "ARRAY_CONTAINS";
+
+    this.filters.push({
+      fieldFilter: {
+        field: { fieldPath: field },
+        op: restOp,
+        value: toFirestoreValue(value)
+      }
+    });
+    return this;
+  }
+
+  limit(n: number) {
+    this.limitVal = n;
+    return this;
+  }
+
+  orderBy(field: string, dir: string = "asc") {
+    this.orderField = field;
+    this.orderDir = dir.toLowerCase() === "desc" ? "DESCENDING" : "ASCENDING";
+    return this;
+  }
+
+  async get() {
+    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
+    
+    let whereClause: any = undefined;
+    if (this.filters.length === 1) {
+      whereClause = this.filters[0];
+    } else if (this.filters.length > 1) {
+      whereClause = {
+        compositeFilter: {
+          op: "AND",
+          filters: this.filters
+        }
+      };
+    }
+
+    const structuredQuery: any = {
+      from: [{ collectionId: this.colName }]
+    };
+
+    if (whereClause) {
+      structuredQuery.where = whereClause;
+    }
+    if (this.limitVal !== undefined) {
+      structuredQuery.limit = this.limitVal;
+    }
+    if (this.orderField) {
+      structuredQuery.orderBy = [{
+        field: { fieldPath: this.orderField },
+        direction: this.orderDir || "ASCENDING"
+      }];
+    }
+
+    const headers: any = { "Content-Type": "application/json" };
+    if (this.token) {
+      headers["Authorization"] = `Bearer ${this.token}`;
+    }
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ structuredQuery })
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.warn(`Query on ${this.colName} failed: ${text}`);
+      return { empty: true, docs: [] };
+    }
+
+    const json = await res.json();
+    const docsList = [];
+
+    if (Array.isArray(json)) {
+      for (const item of json) {
+        if (item.document) {
+          const docId = item.document.name.split("/").pop();
+          const data = fromFirestoreObj(item.document);
+          docsList.push({
+            id: docId,
+            exists: true,
+            data: () => data
+          });
+        }
+      }
+    }
+
+    return {
+      empty: docsList.length === 0,
+      docs: docsList
+    };
+  }
+}
+
+class RESTBatch {
+  private writes: (() => Promise<void>)[] = [];
+
+  update(docRef: any, updates: any) {
+    this.writes.push(async () => {
+      await docRef.update(updates);
+    });
+    return this;
+  }
+
+  set(docRef: any, data: any) {
+    this.writes.push(async () => {
+      await docRef.set(data);
+    });
+    return this;
+  }
+
+  async commit() {
+    await Promise.all(this.writes.map(w => w()));
+  }
+}
+
+class RESTFirestoreDoc {
+  private colName: string;
+  private docId: string;
+  private token?: string;
+
+  constructor(colName: string, docId: string, token?: string) {
+    this.colName = colName;
+    this.docId = docId;
+    this.token = token;
+  }
+
+  get id() { return this.docId; }
+
+  async get() {
+    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/${this.colName}/${this.docId}?key=${firebaseConfig.apiKey}`;
+    try {
+      const headers: any = {};
+      if (this.token) {
+        headers["Authorization"] = `Bearer ${this.token}`;
+      }
+      const res = await fetch(url, { headers });
+      if (res.status === 404) {
+        return { exists: false, data: () => undefined, id: this.docId };
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`REST Get Doc error: ${res.statusText} (${text})`);
+      }
+      const json = await res.json();
+      const data = fromFirestoreObj(json);
+      return { exists: true, data: () => data, id: this.docId };
+    } catch (err) {
+      console.error(`Error fetching doc ${this.colName}/${this.docId}:`, err);
+      return { exists: false, data: () => undefined, id: this.docId };
+    }
+  }
+
+  async set(data: any) {
+    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/${this.colName}/${this.docId}?key=${firebaseConfig.apiKey}`;
+    const body = toFirestoreDocBody(data);
+    const headers: any = { "Content-Type": "application/json" };
+    if (this.token) {
+      headers["Authorization"] = `Bearer ${this.token}`;
+    }
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`REST Set Doc error: ${text}`);
+    }
+  }
+
+  async update(updates: any) {
+    const existing = await this.get();
+    const merged = { ...(existing.data() || {}), ...updates };
+    await this.set(merged);
+  }
+
+  async delete() {
+    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/${this.colName}/${this.docId}?key=${firebaseConfig.apiKey}`;
+    const headers: any = {};
+    if (this.token) {
+      headers["Authorization"] = `Bearer ${this.token}`;
+    }
+    const res = await fetch(url, { method: "DELETE", headers });
+    if (!res.ok && res.status !== 404) {
+      const text = await res.text();
+      throw new Error(`REST Delete Doc error: ${text}`);
+    }
+  }
+}
+
+class RESTFirestore {
+  private token?: string;
+  constructor(token?: string) {
+    this.token = token;
+  }
+
+  withToken(token: string) {
+    return new RESTFirestore(token);
+  }
+
+  collection(colName: string) {
+    return {
+      doc: (docId: string) => new RESTFirestoreDoc(colName, docId, this.token),
+      where: (field: string, op: string, val: any) => new RESTQuery(colName, this.token).where(field, op, val),
+      limit: (n: number) => new RESTQuery(colName, this.token).limit(n),
+      orderBy: (field: string, dir: string) => new RESTQuery(colName, this.token).orderBy(field, dir),
+      get: async () => {
+        return new RESTQuery(colName, this.token).get();
+      }
+    };
+  }
+
+  batch() {
+    return new RESTBatch();
+  }
+}
+
+const db = new RESTFirestore();
+console.log(`Using REST-based Firestore Implementation with custom database: ${firebaseConfig.firestoreDatabaseId}`);
+
+// --- Auth rest endpoints ---
+
+async function signInWithPassword(email: string, pass: string): Promise<string> {
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      password: pass,
+      returnSecureToken: true
+    })
+  });
+  if (!res.ok) {
+    const json = await res.json();
+    throw new Error(json.error?.message || "Invalid credentials");
+  }
+  const json = await res.json();
+  return json.idToken;
+}
+
+async function createAuthUser(email: string, pass: string): Promise<string> {
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      password: pass,
+      returnSecureToken: true
+    })
+  });
+  if (!res.ok) {
+    const json = await res.json();
+    throw new Error(json.error?.message || "Failed to create authentication login.");
+  }
+  const json = await res.json();
+  return json.localId;
+}
 
 async function initDb() {
   try {
-    // Health check
-    await db.collection("health").doc("check").get();
-    console.log("Connected to Firestore via Firebase Admin.");
-
-    // --- Seed Admin User ---
-    const usersRef = db.collection("users");
-    const snapshot = await usersRef.where("email", "==", adminEmail).limit(1).get();
-    
-    if (snapshot.empty) {
-      const hashedPassword = bcrypt.hashSync("admin123", 10);
-      const uid = "admin-uuid-001";
-      await usersRef.doc(uid).set({
-        uid,
-        email: adminEmail,
-        password: hashedPassword,
-        displayName: "Admin Leonardo",
-        role: "Admin",
-        status: "Approved",
-        createdAt: new Date().toISOString()
-      });
-      console.log("Admin user seeded: marzanleonardojrc@gmail.com / admin123");
-    }
+    console.log("REST database initialized smoothly.");
   } catch (err: any) {
-    console.error("--- FIRESTORE INITIALIZATION ERROR ---");
-    console.error(err);
-    console.error("---------------------------------------");
+    console.warn("REST initialization warn:", err.message);
   }
 }
 
@@ -314,6 +642,122 @@ async function startServer() {
     }
   });
 
+  // --- Payment Voiding Route ---
+  app.post("/api/payments/invalidate", authenticateToken, async (req: any, res) => {
+    const { adminEmail, adminPassword, orNumber, reason } = req.body;
+    try {
+      if (!adminEmail || !adminPassword || !orNumber || !reason) {
+        return res.status(400).json({ error: "Missing required fields for voiding." });
+      }
+
+      // 1. Verify admin credentials independently via Auth REST API sign-in
+      let idToken = "";
+      try {
+        idToken = await signInWithPassword(adminEmail, adminPassword);
+      } catch (authErr) {
+        return res.status(401).json({ error: "Unauthorized: Invalid Admin Credentials." });
+      }
+
+      const activeDb = db.withToken(idToken);
+
+      // Verify that the signed-in user actually has Admin role in Firestore
+      const adminQuery = await activeDb.collection("users")
+        .where("email", "==", adminEmail)
+        .where("role", "==", "Admin")
+        .limit(1)
+        .get();
+
+      if (adminQuery.empty) {
+        return res.status(401).json({ error: "Unauthorized: Invalid Admin Privileges." });
+      }
+
+      // 2. Fetch payments under this O.R. Number
+      const paymentsQuery = await activeDb.collection("payments")
+        .where("orNumber", "==", orNumber)
+        .get();
+
+      if (paymentsQuery.empty) {
+        return res.status(404).json({ error: `No payment records found with O.R. Number ${orNumber}` });
+      }
+
+      const batch = activeDb.batch();
+      const currentYear = new Date().getFullYear();
+
+      for (const pDoc of paymentsQuery.docs) {
+        const paymentData = pDoc.data();
+        
+        // Mark payment record in payments collection as Voided
+        const pRef = activeDb.collection("payments").doc(pDoc.id);
+        batch.update(pRef, { 
+          status: "Voided",
+          voidedAt: new Date().toISOString(),
+          voidedBy: adminEmail,
+          voidReason: reason
+        });
+
+        // Find and unlock associated delinquency record
+        if (paymentData.delinquencyId) {
+          const dRef = activeDb.collection("delinquencies").doc(paymentData.delinquencyId);
+          const dSnap = await dRef.get();
+          if (dSnap.exists) {
+            const dData = dSnap.data();
+            const originalYear = dData?.year || paymentData.taxYear || currentYear;
+            const restoredStatus = originalYear >= currentYear ? "Pending" : "Delinquent";
+
+            batch.update(dRef, {
+              status: restoredStatus,
+              totalPaid: 0,
+              updatedAt: new Date().toISOString(),
+              paymentDetails: null
+            });
+          }
+        } else {
+          // Fallback to query delinquency record by propertyId and taxYear
+          const dQuery = await activeDb.collection("delinquencies")
+            .where("propertyId", "==", paymentData.propertyId)
+            .where("year", "==", paymentData.taxYear)
+            .limit(1)
+            .get();
+
+          if (!dQuery.empty) {
+            const dDoc = dQuery.docs[0];
+            const originalYear = paymentData.taxYear || currentYear;
+            const restoredStatus = originalYear >= currentYear ? "Pending" : "Delinquent";
+
+            batch.update(activeDb.collection("delinquencies").doc(dDoc.id), {
+              status: restoredStatus,
+              totalPaid: 0,
+              updatedAt: new Date().toISOString(),
+              paymentDetails: null
+            });
+          }
+        }
+      }
+
+      // Commit batch update
+      await batch.commit();
+
+      // 3. Log into system-wide audit trail
+      const auditId = Math.random().toString(36).substring(2, 15);
+      await activeDb.collection("audit_logs").doc(auditId).set({
+        id: auditId,
+        userId: req.user.uid,
+        userEmail: req.user.email,
+        action: "VOID",
+        entityId: orNumber,
+        entityType: "Collection",
+        oldValue: { orNumber, status: "Active" },
+        newValue: { orNumber, status: "Voided", voidReason: reason, voidedBy: adminEmail },
+        timestamp: new Date().toISOString()
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Voiding process failure:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -324,7 +768,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*all", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

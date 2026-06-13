@@ -6,7 +6,7 @@ import {
   handleFirestoreError,
   OperationType 
 } from "../lib/firebase";
-import { Delinquency, Payment } from "../types";
+import { Delinquency, Payment, Property } from "../types";
 import { formatCurrency, cn } from "../lib/utils";
 import { calculateTotalDue } from "../lib/taxCalculations";
 import { 
@@ -51,8 +51,11 @@ const Dashboard: React.FC = () => {
     });
 
     const unsubProp = onSnapshot(collection(db, "properties"), (snapshot) => {
-      setRawProps(snapshot.docs.map(doc => ({ id: doc.id })));
-      setStats(prev => ({ ...prev, propertyCount: snapshot.size }));
+      const activeProps = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Property))
+        .filter(p => !p.isArchived);
+      setRawProps(activeProps);
+      setStats(prev => ({ ...prev, propertyCount: activeProps.length }));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "properties");
     });

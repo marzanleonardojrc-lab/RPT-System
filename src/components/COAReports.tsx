@@ -69,12 +69,20 @@ const COAReports: React.FC = () => {
   }, []);
 
   const uniqueYears = useMemo(() => {
-    const years = new Set(data.delinq.map(d => d.year.toString()));
+    const years = new Set(
+      data.delinq
+        .filter(d => {
+          if (!d || d.year === undefined || d.year === null) return false;
+          const prop = data.props.find(p => p.id === d.propertyId);
+          return prop && !prop.isArchived;
+        })
+        .map(d => d.year.toString())
+    );
     return Array.from(years).sort((a: string, b: string) => parseInt(b) - parseInt(a));
-  }, [data.delinq]);
+  }, [data.delinq, data.props]);
 
   const uniqueBarangays = useMemo(() => {
-    const brgys = new Set(data.props.map(p => p.barangay));
+    const brgys = new Set(data.props.filter(p => !p.isArchived).map(p => p.barangay));
     return Array.from(brgys).sort();
   }, [data.props]);
 
@@ -98,6 +106,9 @@ const COAReports: React.FC = () => {
     }
 
     let delinq = data.delinq.filter(d => {
+      const prop = data.props.find(p => p.id === d.propertyId);
+      if (!prop || prop.isArchived) return false;
+
       const hasPayment = data.payments.some(p => p.propertyId === d.propertyId && p.taxYear === d.year && p.status === "Active");
       const isPaid = d.status === "Paid" || hasPayment;
 
@@ -107,7 +118,7 @@ const COAReports: React.FC = () => {
     });
 
     if (filterYear !== "All") {
-      delinq = delinq.filter(d => d.year.toString() === filterYear);
+      delinq = delinq.filter(d => d && d.year !== undefined && d.year !== null && d.year.toString() === filterYear);
     }
 
     if (filterBarangay !== "All") {

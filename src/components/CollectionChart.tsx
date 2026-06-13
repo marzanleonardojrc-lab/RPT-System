@@ -56,6 +56,7 @@ export const CollectionChart: React.FC = () => {
   const uniqueBarangays = useMemo(() => {
     const brgys = new Set<string>(DIPACULAO_BARANGAYS);
     properties.forEach(p => {
+      if (p.isArchived) return;
       if (p.barangay && p.barangay.trim()) {
         brgys.add(p.barangay.trim());
       }
@@ -70,9 +71,11 @@ export const CollectionChart: React.FC = () => {
     const filtered = payments.filter(pmt => {
       // Only visualize Active (non-voided) collections
       if (pmt.status !== "Active") return false;
-      if (selectedBarangay === "all") return true;
 
       const prop = properties.find(p => p.id === pmt.propertyId);
+      if (!prop || prop.isArchived) return false;
+
+      if (selectedBarangay === "all") return true;
       return prop?.barangay === selectedBarangay;
     });
 
@@ -107,8 +110,10 @@ export const CollectionChart: React.FC = () => {
     payments.forEach(pmt => {
       if (pmt.status !== "Active") return;
 
+      const prop = properties.find(p => p.id === pmt.propertyId);
+      if (!prop || prop.isArchived) return;
+
       if (selectedBarangay !== "all") {
-        const prop = properties.find(p => p.id === pmt.propertyId);
         if (prop?.barangay !== selectedBarangay) return;
       }
 

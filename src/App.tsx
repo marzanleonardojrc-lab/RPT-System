@@ -12,12 +12,26 @@ import CollectionModule from "./components/CollectionModule";
 import Login from "./components/Login";
 import ProfileModal from "./components/ProfileModal";
 import { AlertCircle } from "lucide-react";
-import OfflineSyncStatus from "./components/OfflineSyncStatus";
+import TaxpayerPortal from "./components/TaxpayerPortal";
+import ForcedPasswordResetOverlay from "./components/ForcedPasswordResetOverlay";
+import { GlobalSearch } from "./components/GlobalSearch";
+import PropertyDetails from "./components/PropertyDetails";
+import { Property } from "./types";
 
 const AppContent: React.FC = () => {
-  const { user, profile, loading, logout, isAdmin, isEncoder, isOffline } = useAuth();
+  const { user, profile, loading, logout, isAdmin, isEncoder, isOffline, isTaxpayer } = useAuth();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [selectedPropertyFromSearch, setSelectedPropertyFromSearch] = useState<Property | null>(null);
+
+  React.useEffect(() => {
+    const savedTheme = localStorage.getItem("theme");
+    if (savedTheme === "light") {
+      document.documentElement.classList.add("light");
+    } else {
+      document.documentElement.classList.remove("light");
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -47,6 +61,14 @@ const AppContent: React.FC = () => {
         </div>
       </div>
     );
+  }
+
+  if (isTaxpayer) {
+    return <TaxpayerPortal profile={profile} logout={logout} isOffline={isOffline} />;
+  }
+
+  if (profile.requiresPasswordReset) {
+    return <ForcedPasswordResetOverlay profile={profile} logout={logout} />;
   }
 
   if (profile.status === "Pending") {
@@ -135,7 +157,8 @@ const AppContent: React.FC = () => {
 
     switch (activeTab) {
       case "dashboard": return <Dashboard />;
-      case "properties": return <PropertyRegistry isEncoder={isEncoder} isAdmin={isAdmin} />;
+      case "properties": return <PropertyRegistry key="properties-active" isEncoder={isEncoder} isAdmin={isAdmin} initialTab="Active" showTabsSelector={false} />;
+      case "archive": return <PropertyRegistry key="properties-archive" isEncoder={isEncoder} isAdmin={isAdmin} initialTab="Archived" showTabsSelector={false} />;
       case "collection": return <CollectionModule />;
       case "delinquencies": return <DelinquencyList isEncoder={isEncoder} isAdmin={isAdmin} />;
       case "reconciliation": return <ReconciliationModule />;
@@ -157,7 +180,9 @@ const AppContent: React.FC = () => {
       <main className="pl-64 min-h-screen bg-[radial-gradient(circle_at_top_right,_#1e293b,_transparent_40%)]">
         <header className="h-16 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 sticky top-0 z-10">
           <div className="flex items-center gap-4">
-            <OfflineSyncStatus />
+            {isAdmin && (
+              <GlobalSearch onSelectProperty={(p) => setSelectedPropertyFromSearch(p)} />
+            )}
           </div>
           <div className="flex items-center gap-4">
             <div 
@@ -183,6 +208,13 @@ const AppContent: React.FC = () => {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
+
+      {selectedPropertyFromSearch && (
+        <PropertyDetails 
+          property={selectedPropertyFromSearch} 
+          onClose={() => setSelectedPropertyFromSearch(null)} 
+        />
+      )}
     </div>
   );
 };

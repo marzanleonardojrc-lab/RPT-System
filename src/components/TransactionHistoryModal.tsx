@@ -99,7 +99,7 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
         p.orNumber?.toLowerCase().includes(term) ||
         p.payerName?.toLowerCase().includes(term) ||
         p.recordedBy?.toLowerCase().includes(term) ||
-        p.taxYear?.toString().includes(term)
+        (p.taxYear?.toString() || "").includes(term)
       );
     }
 

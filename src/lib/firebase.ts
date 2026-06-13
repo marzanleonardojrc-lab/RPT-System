@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { 
-  getFirestore, 
-  enableMultiTabIndexedDbPersistence, 
+  initializeFirestore,
+  memoryLocalCache,
   collection, 
   doc, 
   addDoc, 
@@ -21,21 +21,98 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Overwrite localStorage.setItem and sessionStorage.setItem to catch and ignore QuotaExceededError
+try {
+  if (typeof window !== 'undefined') {
+    if (window.localStorage) {
+      const originalSetItem = window.localStorage.setItem;
+      window.localStorage.setItem = function (key, value) {
+        try {
+          originalSetItem.call(window.localStorage, key, value);
+        } catch (err: any) {
+          if (err.name === 'QuotaExceededError' || err.code === 22 || err.message?.includes('quota') || err.message?.includes('Storage')) {
+            console.warn(`[LocalStorage Patch] Intercepted QuotaExceededError for key: "${key}". Clearing non-essential keys...`);
+            try {
+              // Clear non-essential items
+              const keysToRemove: string[] = [];
+              for (let i = 0; i < window.localStorage.length; i++) {
+                const k = window.localStorage.key(i);
+                if (k && k !== 'theme' && k !== 'rpt_offline_sync_queue') {
+                  keysToRemove.push(k);
+                }
+              }
+              keysToRemove.forEach(k => {
+                try { window.localStorage.removeItem(k); } catch (e) {}
+              });
+              // Try again
+              originalSetItem.call(window.localStorage, key, value);
+            } catch (retryErr) {
+              // If it still fails, just swallow the error to prevent crash
+              console.warn('[LocalStorage Patch] Storage is completely full or restricted. Ignoring setItem call for:', key);
+            }
+          } else {
+            throw err;
+          }
+        }
+      };
+    }
 
-// Enable offline persistence
-enableMultiTabIndexedDbPersistence(db).catch((err) => {
-  if (err.code === 'failed-precondition') {
-    // Multiple tabs open, persistence can only be enabled in one tab at a time.
-    console.warn('Firestore persistence failed: Multiple tabs open');
-  } else if (err.code === 'unimplemented') {
-    // The current browser does not support all of the features required to enable persistence
-    console.warn('Firestore persistence failed: Browser not supported');
-  } else {
-    console.error('Firestore persistence error:', err);
+    if (window.sessionStorage) {
+      const originalSetSessionItem = window.sessionStorage.setItem;
+      window.sessionStorage.setItem = function (key, value) {
+        try {
+          originalSetSessionItem.call(window.sessionStorage, key, value);
+        } catch (err: any) {
+          if (err.name === 'QuotaExceededError' || err.code === 22 || err.message?.includes('quota') || err.message?.includes('Storage')) {
+            console.warn(`[SessionStorage Patch] Intercepted QuotaExceededError for key: "${key}". Clearing non-essential keys...`);
+            try {
+              window.sessionStorage.clear();
+              originalSetSessionItem.call(window.sessionStorage, key, value);
+            } catch (retryErr) {
+              console.warn('[SessionStorage Patch] Storage is completely full. Ignoring setItem call for:', key);
+            }
+          } else {
+            throw err;
+          }
+        }
+      };
+    }
   }
-});
+} catch (err) {
+  console.warn('Error applying storage patches:', err);
+}
+
+// Clear Firestore-related localStorage metadata that causes QuotaExceededError
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && (key.startsWith('firestore_') || key.includes('firestore_mutations') || key.includes('firestore_targets'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(k => {
+      try {
+        window.localStorage.removeItem(k);
+      } catch (e) {
+        // Ignore
+      }
+    });
+    if (keysToRemove.length > 0) {
+      console.log(`[LocalStorage Cleanup] Cleared ${keysToRemove.length} outdated Firestore local-storage sync keys to prevent QuotaExceededError.`);
+    }
+  }
+} catch (err) {
+  console.warn('Error clearing Firestore localStorage keys:', err);
+}
+
+const app = initializeApp(firebaseConfig);
+export const db = initializeFirestore(app, {
+  localCache: memoryLocalCache()
+}, firebaseConfig.firestoreDatabaseId);
+
+console.log('[Firestore] Local cache is configured to use in-memory storage to completely prevent QuotaExceededError in restricted iframe environments.');
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

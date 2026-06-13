@@ -244,7 +244,7 @@ export const NoticeOfDelinquencyPrintView: React.FC<NoticeOfDelinquencyPrintView
     height: "25px",
     minHeight: "25px",
     boxSizing: "border-box",
-    paddingBottom: "1.5px",
+    paddingBottom: "4px",
     lineHeight: "1.25",
   };
 
@@ -255,7 +255,7 @@ export const NoticeOfDelinquencyPrintView: React.FC<NoticeOfDelinquencyPrintView
     height: "25px",
     minHeight: "25px",
     boxSizing: "border-box",
-    paddingBottom: "1.5px",
+    paddingBottom: "4px",
     paddingLeft: "4px",
     paddingRight: "4px",
     lineHeight: "1.25",
@@ -274,7 +274,7 @@ export const NoticeOfDelinquencyPrintView: React.FC<NoticeOfDelinquencyPrintView
     height: "25px",
     minHeight: "25px",
     boxSizing: "border-box",
-    paddingBottom: "1.5px",
+    paddingBottom: "4px",
     lineHeight: "1.25",
   };
 
@@ -285,7 +285,7 @@ export const NoticeOfDelinquencyPrintView: React.FC<NoticeOfDelinquencyPrintView
     height: "25px",
     minHeight: "25px",
     boxSizing: "border-box",
-    paddingBottom: "1.5px",
+    paddingBottom: "4px",
     paddingLeft: "4px",
     paddingRight: "4px",
     lineHeight: "1.25",
@@ -451,7 +451,7 @@ export const NoticeOfDelinquencyPrintView: React.FC<NoticeOfDelinquencyPrintView
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-950 text-black z-[9999] overflow-auto font-sans leading-tight">
+    <div className="fixed inset-0 bg-slate-100 text-black z-[9999] overflow-auto font-sans leading-tight">
       <style dangerouslySetInnerHTML={{ __html: `
         /* Prevent html2canvas / jsPDF from rendering unwanted strikethroughs */
         .printable-page-container,
@@ -512,47 +512,45 @@ export const NoticeOfDelinquencyPrintView: React.FC<NoticeOfDelinquencyPrintView
       ` }} />
 
       {/* Control panel (Non-printable) */}
-      <div className="sticky top-0 bg-slate-900 border-b border-slate-800 p-4 flex justify-between items-center no-print z-10 shadow-lg">
+      <div className="sticky top-0 bg-slate-100 border-b border-slate-300 p-4 flex justify-between items-center no-print z-10 font-sans shadow-sm">
         <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 rounded-xl font-bold transition-all flex items-center gap-2 cursor-pointer"
+            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-medium transition-colors cursor-pointer"
           >
-            <ArrowLeft className="w-4 h-4" />
-            Back to List
+            Back to Application
           </button>
-          <div>
-            <h1 className="text-white text-sm font-black uppercase tracking-wider">Notice of Delinquency Preview</h1>
-            <p className="text-xs text-slate-400">Strictly formatted for 8" x 13" (Folio/Long) paper. Fits exactly on single page.</p>
-          </div>
         </div>
+        
+        <span className="text-sm font-semibold text-slate-600 text-center">
+          Print Preview: Ensure Paper Size is set to "8.5 x 13" or "Folio" with Portrait orientation in Print Dialog.
+        </span>
+
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={handleSavePDF}
             disabled={isSavingPdf}
-            className="px-5 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-800/50 disabled:text-slate-500 text-slate-200 border border-slate-700 hover:border-slate-600 rounded-xl font-bold uppercase tracking-widest text-xs transition-all shadow-md active:scale-95 flex items-center gap-2 cursor-pointer"
+            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 disabled:bg-slate-100 disabled:text-slate-400 text-slate-800 rounded font-medium transition-colors cursor-pointer flex items-center gap-2"
             title="Saves document as a PDF file"
           >
-            <Download className="w-4 h-4 text-indigo-400" />
+            <Download className="w-4 h-4" />
             {isSavingPdf ? "Saving PDF..." : "Save PDF"}
           </button>
+
           <button
             type="button"
             onClick={handlePrint}
-            disabled={isSavingPdf}
-            className="px-5 py-2 bg-red-600 hover:bg-red-500 disabled:bg-red-900/50 disabled:text-slate-400 text-white rounded-xl font-black uppercase tracking-widest text-xs transition-all shadow-lg shadow-red-950/40 active:scale-95 flex items-center gap-2 cursor-pointer"
-            title="Prints the notice of delinquency"
+            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow-sm cursor-pointer"
           >
-            <Printer className="w-4 h-4" />
-            Print Notice
+            Print Document
           </button>
         </div>
       </div>
 
       {/* Document page simulated frame (On-screen) */}
-      <div className="print-overlay-container min-h-[calc(100vh-73px)] bg-slate-950 py-10 px-4 flex justify-center items-center no-print">
+      <div className="print-overlay-container min-h-[calc(100vh-73px)] bg-slate-100 py-10 px-4 flex justify-center items-center no-print">
         <div ref={printAreaRef} className="printable-page-container bg-white border-2 border-black p-[12px] w-[7.5in] h-[12.5in] max-h-[12.5in] flex flex-col justify-between shadow-2xl relative box-border" style={{ textDecoration: "none" }}>
           
           <div>
@@ -604,8 +602,8 @@ export const NoticeOfDelinquencyPrintView: React.FC<NoticeOfDelinquencyPrintView
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <tbody>
                         <tr>
-                          <td style={{ width: "25%", fontWeight: "bold", verticalAlign: "bottom", paddingBottom: "2px" }}>Date:</td>
-                          <td style={{ borderBottom: "1px solid black", width: "75%", fontWeight: "semibold", verticalAlign: "bottom", paddingBottom: "2px", paddingLeft: "4px", textAlign: "center" }}>
+                          <td style={{ width: "25%", fontWeight: "bold", verticalAlign: "bottom", paddingBottom: "4px" }}>Date:</td>
+                          <td style={{ borderBottom: "1px solid black", width: "75%", fontWeight: "semibold", verticalAlign: "bottom", paddingBottom: "4px", paddingLeft: "4px", textAlign: "center" }}>
                             {formatDate(currentDate.toISOString())}
                           </td>
                         </tr>
@@ -913,8 +911,8 @@ export const NoticeOfDelinquencyPrintView: React.FC<NoticeOfDelinquencyPrintView
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <tbody>
                         <tr>
-                          <td style={{ width: "25%", fontWeight: "bold", verticalAlign: "bottom", paddingBottom: "2px" }}>Date:</td>
-                          <td style={{ borderBottom: "1px solid black", width: "75%", fontWeight: "semibold", verticalAlign: "bottom", paddingBottom: "2px", paddingLeft: "4px", textAlign: "center" }}>
+                          <td style={{ width: "25%", fontWeight: "bold", verticalAlign: "bottom", paddingBottom: "4px" }}>Date:</td>
+                          <td style={{ borderBottom: "1px solid black", width: "75%", fontWeight: "semibold", verticalAlign: "bottom", paddingBottom: "4px", paddingLeft: "4px", textAlign: "center" }}>
                             {formatDate(currentDate.toISOString())}
                           </td>
                         </tr>

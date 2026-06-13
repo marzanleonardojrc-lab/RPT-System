@@ -68,7 +68,10 @@ export const ReconciliationModule: React.FC = () => {
   }, []);
 
   // Filter delinquencies by the selected fiscal year (Cumulative up to this year)
-  const filteredDelinquencies = delinquencies.filter(d => d.year <= parseInt(fiscalYear));
+  const filteredDelinquencies = delinquencies.filter(d => 
+    d.year <= parseInt(fiscalYear) && 
+    !properties.find(p => p.id === d.propertyId)?.isArchived
+  );
 
   // Assessor's Office
   const unarchivedProperties = properties.filter(p => !p.isArchived);

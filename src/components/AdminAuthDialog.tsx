@@ -61,7 +61,14 @@ export default function AdminAuthDialog({ isOpen, onClose, onConfirm }: AdminAut
       const errorCode = err.code || "";
       const errorMsg = err.message || "";
 
-      if (errorCode === 'auth/invalid-credential' || errorCode === 'auth/wrong-password' || errorCode === 'auth/user-not-found' || errorMsg.includes('invalid-credential')) {
+      if (
+        errorCode === 'auth/invalid-credential' || 
+        errorCode === 'auth/wrong-password' || 
+        errorCode === 'auth/user-not-found' || 
+        errorMsg.includes('invalid-credential') ||
+        errorMsg.includes('wrong-password') ||
+        errorMsg.includes('user-not-found')
+      ) {
         setError("Invalid email/username or password. If you signed in with Google, please use the button below.");
       } else {
         setError(errorMsg || "Authentication failed. Please check credentials.");

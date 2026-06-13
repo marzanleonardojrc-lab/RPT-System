@@ -127,6 +127,52 @@
         "recordedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["delinquencyId", "propertyId", "orNumber", "amountPaid", "status", "recordedAt"]
+    },
+    "TaxpayerRequest": {
+      "title": "Taxpayer Request",
+      "description": "Information regarding a dynamic application form submitted by a resident taxpayer.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "propertyTdn": { "type": "string" },
+        "propertyOwner": { "type": "string" },
+        "type": { "type": "string", "enum": ["clearance", "revision", "transfer"] },
+        "status": { "type": "string", "enum": ["Submitted", "Approved", "Rejected", "Pending"] },
+        "createdAt": { "type": "string" },
+        "contact": { "type": "string" },
+        "purpose": { "type": "string" },
+        "proposedAssessedValue": { "type": "number" },
+        "reason": { "type": "string" },
+        "newOwnerName": { "type": "string" },
+        "newOwnerAddress": { "type": "string" },
+        "transferDate": { "type": "string" }
+      },
+      "required": ["userId", "userEmail", "userName", "propertyId", "type", "status", "createdAt"]
+    },
+    "Reconciliation": {
+      "title": "Reconciliation Status",
+      "description": "Staff/encoder-logged details for annual tax account reconciliations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "year": { "type": "integer" },
+        "propertiesChecked": { "type": "integer" },
+        "totalReconciledAmount": { "type": "number" }
+      },
+      "required": ["id"]
+    },
+    "UserMapping": {
+      "title": "User login identifier to email mapping",
+      "description": "Helps map clean usernames to exact system auth accounts during complex registration checks.",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "email": { "type": "string" }
+      },
+      "required": ["username", "email"]
     }
   },
   "firestore": {
@@ -149,6 +195,18 @@
     "audit_logs": {
       "schema": "AuditLog",
       "description": "Audit trail for system activity."
+    },
+    "taxpayer_requests": {
+      "schema": "TaxpayerRequest",
+      "description": "Applications filed by resident taxpayers."
+    },
+    "reconciliations": {
+      "schema": "Reconciliation",
+      "description": "Annual database/treasury synchronizations."
+    },
+    "user_mappings": {
+      "schema": "UserMapping",
+      "description": "Identifier lookups."
     }
   }
 }

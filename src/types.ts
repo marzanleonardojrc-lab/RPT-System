@@ -1,4 +1,4 @@
-export type UserRole = "Admin" | "User" | "Guest" | "End-User";
+export type UserRole = "Admin" | "User" | "Guest" | "End-User" | "Taxpayer" | "Resident";
 export type UserStatus = "Pending" | "Approved" | "Denied";
 
 export interface UserProfile {
@@ -9,6 +9,9 @@ export interface UserProfile {
   role: UserRole;
   status: UserStatus;
   createdAt: string;
+  linkedPropertyIds?: string[];
+  requiresPasswordReset?: boolean;
+  designation?: string;
 }
 
 export type PropertyClassification = "LAND" | "BUILDING" | "MACHINERY";

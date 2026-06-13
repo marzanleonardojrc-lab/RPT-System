@@ -14,11 +14,10 @@ service cloud.firestore {
     }
 
     function isApproved() {
-      let email = (request.auth.token.email != null) ? request.auth.token.email.lower() : '';
       return isSignedIn() && (
-        email == 'marzanleonardojrc@gmail.com' || 
-        email == 'marzan.leonardo04@gmail.com' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().status == 'Approved')
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'marzanleonardojrc@gmail.com') || 
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'marzan.leonardo04@gmail.com') ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (getUserData().status == 'Approved' || getUserData().role == 'Taxpayer' || getUserData().role == 'Resident'))
       );
     }
     
@@ -29,10 +28,9 @@ service cloud.firestore {
     }
 
     function isAdmin() { 
-      let email = (request.auth.token.email != null) ? request.auth.token.email.lower() : '';
       return isSignedIn() && (
-        email == 'marzanleonardojrc@gmail.com' || 
-        email == 'marzan.leonardo04@gmail.com' || 
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'marzanleonardojrc@gmail.com') || 
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'marzan.leonardo04@gmail.com') || 
         hasRole('Admin')
       ); 
     }
@@ -40,81 +38,87 @@ service cloud.firestore {
     function isEncoder() { return isAdmin() || hasRole('User') || hasRole('End-User'); }
     function isViewer() { return isAdmin() || isApproved(); }
     
-    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isTaxpayer() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             (getUserData().role == 'Taxpayer' || getUserData().role == 'Resident');
+    }
+
+    function isNum(val) { return val is int || val is float; }
+    function isTime(val) { return val is timestamp || (val is string && val.size() <= 200); }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_.@-]+$'); }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
 
     function isValidUser(data) {
-      return data.uid == request.auth.uid &&
-             data.email == (request.auth.token.email != null ? request.auth.token.email : '') &&
-             data.role in ['Admin', 'User', 'Guest', 'End-User'] &&
+      return data.role in ['Admin', 'User', 'Guest', 'End-User', 'Taxpayer', 'Resident'] &&
              data.status in ['Pending', 'Approved', 'Denied'] &&
-             (resource == null ? data.createdAt == request.time : data.createdAt == existing().createdAt);
+             (!('linkedPropertyIds' in data.keys()) || data.linkedPropertyIds is list);
     }
 
     function isValidProperty(data) {
       let isCreate = resource == null;
-      let requiredFields = ['ownerName', 'ownerAddress', 'effectivityDate', 'tdNumber', 'detailedLocation', 'barangay', 'municipality', 'province', 'classification', 'area', 'assessedValue', 'updatedAt', 'createdAt'];
+      let requiredFields = ['ownerName', 'tdNumber', 'barangay', 'classification', 'assessedValue'];
       
-      let barangays = ['Bayabas', 'Borlongan', 'Buenavista', 'Calaocan', 'Diamanen', 'Dianed', 'Diarabasin', 'Dibutunan', 'Dimabuno', 'Dinadiawan', 'Ditale', 'Gupa', 'Ipil', 'Laboy', 'Lipit', 'Lobbot', 'Maligaya', 'Mijares', 'Mucdol', 'North Poblacion', 'Puangi', 'Salay', 'Sapangkawayan', 'South Poblacion', 'Toytoyan'];
-
-      // On create, all required fields must be present
-      // On update, we only check if present fields have the right type
       let base = (isCreate ? data.keys().hasAll(requiredFields) : true) &&
-                 (!('ownerName' in data.keys()) || data.ownerName is string) &&
-                 (!('ownerAddress' in data.keys()) || data.ownerAddress is string) &&
-                 (!('effectivityDate' in data.keys()) || data.effectivityDate is string) &&
-                 (!('tdNumber' in data.keys()) || data.tdNumber is string) &&
-                 (!('detailedLocation' in data.keys()) || data.detailedLocation is string) &&
-                 (!('barangay' in data.keys()) || data.barangay in barangays || (resource != null && data.barangay == existing().barangay)) &&
-                 (!('municipality' in data.keys()) || data.municipality == 'Dipaculao') &&
-                 (!('province' in data.keys()) || data.province == 'Aurora') &&
-                 (!('classification' in data.keys()) || data.classification in ['LAND', 'BUILDING', 'MACHINERY']) &&
-                 (!('area' in data.keys()) || data.area is string) &&
-                 (!('assessedValue' in data.keys()) || data.assessedValue is number) &&
-                 data.updatedAt == request.time &&
-                 (isCreate ? data.createdAt == request.time : true);
+                 (!('ownerName' in data.keys()) || (data.ownerName is string && data.ownerName.size() <= 500)) &&
+                 (!('ownerAddress' in data.keys()) || (data.ownerAddress is string && data.ownerAddress.size() <= 500)) &&
+                 (!('effectivityDate' in data.keys()) || (data.effectivityDate is string && data.effectivityDate.size() <= 100)) &&
+                 (!('tdNumber' in data.keys()) || (data.tdNumber is string && data.tdNumber.size() <= 100)) &&
+                 (!('detailedLocation' in data.keys()) || (data.detailedLocation is string && data.detailedLocation.size() <= 500)) &&
+                 (!('barangay' in data.keys()) || (data.barangay is string && data.barangay.size() <= 200)) &&
+                 (!('municipality' in data.keys()) || (data.municipality is string && data.municipality.size() <= 200)) &&
+                 (!('province' in data.keys()) || (data.province is string && data.province.size() <= 200)) &&
+                 (!('classification' in data.keys()) || (data.classification is string && data.classification.size() <= 100)) &&
+                 (!('area' in data.keys()) || (data.area is string && data.area.size() <= 100)) &&
+                 (!('assessedValue' in data.keys()) || isNum(data.assessedValue)) &&
+                 (!('updatedAt' in data.keys()) || isTime(data.updatedAt)) &&
+                 (!('createdAt' in data.keys()) || isTime(data.createdAt));
       
-      let extra = (!('id' in data.keys()) || data.id is string) &&
-                  (!('pin' in data.keys()) || data.pin is string) &&
-                  (!('administratorName' in data.keys()) || data.administratorName is string) &&
-                  (!('administratorAddress' in data.keys()) || data.administratorAddress is string) &&
-                  (!('street' in data.keys()) || data.street is string) &&
-                  (!('lotNo' in data.keys()) || data.lotNo is string) &&
-                  (!('blkNo' in data.keys()) || data.blkNo is string) &&
-                  (!('octTct' in data.keys()) || data.octTct is string) &&
-                  (!('cctCloa' in data.keys()) || data.cctCloa is string) &&
-                  (!('previousTdNo' in data.keys()) || data.previousTdNo is string) &&
-                  (!('previousOwner' in data.keys()) || data.previousOwner is string) &&
-                  (!('previousAssessedValue' in data.keys()) || data.previousAssessedValue is number) &&
-                  (!('recordedBy' in data.keys()) || data.recordedBy is string) &&
+      let extra = (!('id' in data.keys()) || (data.id is string && data.id.size() <= 200)) &&
+                  (!('pin' in data.keys()) || (data.pin is string && data.pin.size() <= 200)) &&
+                  (!('administratorName' in data.keys()) || (data.administratorName is string && data.administratorName.size() <= 500)) &&
+                  (!('administratorAddress' in data.keys()) || (data.administratorAddress is string && data.administratorAddress.size() <= 500)) &&
+                  (!('street' in data.keys()) || (data.street is string && data.street.size() <= 200)) &&
+                  (!('lotNo' in data.keys()) || (data.lotNo is string && data.lotNo.size() <= 200)) &&
+                  (!('blkNo' in data.keys()) || (data.blkNo is string && data.blkNo.size() <= 200)) &&
+                  (!('octTct' in data.keys()) || (data.octTct is string && data.octTct.size() <= 200)) &&
+                  (!('cctCloa' in data.keys()) || (data.cctCloa is string && data.cctCloa.size() <= 200)) &&
+                  (!('previousTdNo' in data.keys()) || (data.previousTdNo is string && data.previousTdNo.size() <= 200)) &&
+                  (!('previousOwner' in data.keys()) || (data.previousOwner is string && data.previousOwner.size() <= 500)) &&
+                  (!('previousAssessedValue' in data.keys()) || isNum(data.previousAssessedValue)) &&
+                  (!('recordedBy' in data.keys()) || (data.recordedBy is string && data.recordedBy.size() <= 200)) &&
                   (!('imported' in data.keys()) || data.imported is bool) &&
                   (!('isArchived' in data.keys()) || data.isArchived is bool) &&
-                  (!('archivedAt' in data.keys()) || data.archivedAt == null || data.archivedAt is string);
+                  (!('archivedAt' in data.keys()) || data.archivedAt == null || (data.archivedAt is string && data.archivedAt.size() <= 200));
                  
       return base && extra;
     }
 
     function isValidDelinquency(data) {
-      let base = data.propertyId is string &&
-                 data.year is number &&
-                 data.basicTaxDue is number &&
-                 data.sefTaxDue is number &&
-                 (!('idleSurcharge' in data.keys()) || data.idleSurcharge is number) &&
-                 data.penalty is number &&
-                 data.interest is number &&
-                 data.totalDue is number &&
-                 (!('totalPaid' in data.keys()) || data.totalPaid is number) &&
-                 data.status in ['Delinquent', 'Paid', 'Voided', 'Pending'] &&
+      let isCreate = resource == null;
+      let requiredFields = ['propertyId', 'year', 'basicTaxDue', 'status'];
+
+      let base = (isCreate ? data.keys().hasAll(requiredFields) : true) &&
+                 (!('propertyId' in data.keys()) || data.propertyId is string) &&
+                 (!('year' in data.keys()) || data.year is int) &&
+                 (!('basicTaxDue' in data.keys()) || isNum(data.basicTaxDue)) &&
+                 (!('sefTaxDue' in data.keys()) || isNum(data.sefTaxDue)) &&
+                 (!('idleSurcharge' in data.keys()) || isNum(data.idleSurcharge)) &&
+                 (!('penalty' in data.keys()) || isNum(data.penalty)) &&
+                 (!('interest' in data.keys()) || isNum(data.interest)) &&
+                 (!('totalDue' in data.keys()) || isNum(data.totalDue)) &&
+                 (!('totalPaid' in data.keys()) || isNum(data.totalPaid)) &&
+                 (!('status' in data.keys()) || data.status in ['Delinquent', 'Paid', 'Voided', 'Pending']) &&
                  (!('recordedBy' in data.keys()) || data.recordedBy is string) &&
                  (!('createdBy' in data.keys()) || data.createdBy is string) &&
-                 data.updatedAt == request.time &&
-                 (resource == null ? data.createdAt == request.time : true) &&
+                 (!('updatedAt' in data.keys()) || isTime(data.updatedAt)) &&
+                 (!('createdAt' in data.keys()) || isTime(data.createdAt)) &&
                  // Ensure property exists on creation
                  (resource == null ? exists(/databases/$(database)/documents/properties/$(data.propertyId)) : true);
       
       let paymentCheck = (!('paymentDetails' in data.keys())) || data.paymentDetails == null ||
-                         (data.paymentDetails is map && data.paymentDetails.orNumber is string);
+                          (data.paymentDetails is map && (!('orNumber' in data.paymentDetails.keys()) || data.paymentDetails.orNumber is string));
 
       let pendingCheck = (!('pendingUpdate' in data.keys())) || data.pendingUpdate == null || (data.pendingUpdate is map);
       let voidCheck = (!('voidMetadata' in data.keys())) || data.voidMetadata == null || (data.voidMetadata is map);
@@ -123,75 +127,98 @@ service cloud.firestore {
     }
 
     function isValidPayment(data) {
-      return data.delinquencyId is string &&
-             data.propertyId is string &&
-             data.orNumber is string &&
-             data.amountPaid is number &&
-             data.status in ['Active', 'Voided'] &&
-             data.recordedAt is string &&
+      let isCreate = resource == null;
+      let requiredFields = ['delinquencyId', 'propertyId', 'orNumber', 'amountPaid', 'status', 'recordedAt'];
+      return (isCreate ? data.keys().hasAll(requiredFields) : true) &&
+             (!('delinquencyId' in data.keys()) || data.delinquencyId is string) &&
+             (!('propertyId' in data.keys()) || data.propertyId is string) &&
+             (!('orNumber' in data.keys()) || data.orNumber is string) &&
+             (!('amountPaid' in data.keys()) || isNum(data.amountPaid)) &&
+             (!('status' in data.keys()) || data.status in ['Active', 'Voided']) &&
+             (!('recordedAt' in data.keys()) || isTime(data.recordedAt)) &&
              // Ensure delinquency exists
-             exists(/databases/$(database)/documents/delinquencies/$(data.delinquencyId));
+             (resource == null ? exists(/databases/$(database)/documents/delinquencies/$(data.delinquencyId)) : true);
     }
 
     function isValidAuditLog(data) {
       return data.userId == request.auth.uid &&
-             data.timestamp == request.time &&
+             isTime(data.timestamp) &&
              data.action is string &&
              data.entityType is string;
+    }
+
+    function isValidTaxpayerRequest(data) {
+      return data.userId == request.auth.uid &&
+             data.userEmail is string &&
+             data.userName is string &&
+             data.propertyId is string &&
+             data.propertyTdn is string &&
+             data.propertyOwner is string &&
+             data.type in ['clearance', 'revision', 'transfer'] &&
+             data.status in ['Submitted', 'Approved', 'Rejected', 'Pending'] &&
+             isTime(data.createdAt);
     }
 
     // --- Collections ---
 
     match /users/{userId} {
-      allow get: if isSignedIn();
+      allow get: if isSignedIn() && (userId == request.auth.uid || isAdmin() || isValidId(userId));
       allow list: if isAdmin();
-      allow create: if isSignedIn() && userId == request.auth.uid && isValidUser(incoming());
-      allow update: if isAdmin() || (userId == request.auth.uid && incoming().role == existing().role); // Can't self-promote
-      allow delete: if isAdmin();
+      allow create: if isSignedIn() && (userId == request.auth.uid || isAdmin()) && isValidUser(incoming()) && (userId == request.auth.uid || isValidId(userId));
+      allow update: if isAdmin() || (isSignedIn() && userId == request.auth.uid && isValidUser(incoming()) && (incoming().role == existing().role) && (userId == request.auth.uid || isValidId(userId)));
+      allow delete: if isAdmin() && isValidId(userId);
     }
 
     match /properties/{propertyId} {
-      allow read: if isViewer();
+      allow read: if true;
       allow create: if isEncoder() && isValidProperty(incoming()) && isValidId(propertyId);
-      allow update: if isEncoder() && isValidProperty(incoming());
-      allow delete: if isAdmin();
+      allow update: if isEncoder() && isValidProperty(incoming()) && isValidId(propertyId);
+      allow delete: if isAdmin() && isValidId(propertyId);
     }
 
     match /delinquencies/{delinqId} {
       allow read: if isViewer();
       allow create: if isEncoder() && isValidDelinquency(incoming()) && isValidId(delinqId);
-      allow update: if isEncoder() && isValidDelinquency(incoming()) &&
-                    (
-                      // Allow updating most fields directly as an encoder
-                      incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'year', 'basicTaxDue', 'sefTaxDue', 'idleSurcharge', 'penalty', 'interest', 'totalDue', 'totalPaid', 'paymentDetails', 'voidMetadata', 'pendingUpdate'])
+      allow update: if isValidId(delinqId) && (
+                      isAdmin() ||
+                      (isEncoder() && isValidDelinquency(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'year', 'basicTaxDue', 'sefTaxDue', 'idleSurcharge', 'penalty', 'interest', 'totalDue', 'totalPaid', 'paymentDetails', 'voidMetadata', 'pendingUpdate'])) ||
+                      (isTaxpayer() && isValidDelinquency(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'totalPaid', 'updatedAt']))
                     );
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() && isValidId(delinqId);
     }
 
     match /payments/{paymentId} {
       allow read: if isViewer();
-      allow create: if isEncoder() && isValidPayment(incoming());
-      allow update: if isEncoder() && isValidPayment(incoming()) &&
-                    incoming().diff(existing()).affectedKeys().hasOnly(['status', 'voidMetadata', 'updatedAt']);
-      allow delete: if isAdmin();
+      allow create: if isValidId(paymentId) && (isEncoder() || isTaxpayer()) && isValidPayment(incoming());
+      allow update: if isValidId(paymentId) && (isAdmin() || (isEncoder() && isValidPayment(incoming()) &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['status', 'voidMetadata', 'updatedAt'])));
+      allow delete: if isAdmin() && isValidId(paymentId);
     }
 
     match /audit_logs/{logId} {
       allow read: if isAdmin();
-      allow create: if isSignedIn() && isValidAuditLog(incoming());
-      // No updates or deletes allowed
+      allow create: if isSignedIn() && isValidAuditLog(incoming()) && isValidId(logId);
     }
 
     match /reconciliations/{yearId} {
       allow read: if isViewer();
-      allow create, update: if isEncoder();
-      allow delete: if isAdmin();
+      allow create, update: if isEncoder() && isValidId(yearId);
+      allow delete: if isAdmin() && isValidId(yearId);
     }
 
     match /user_mappings/{mappingId} {
       allow read: if true;
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin() || (isSignedIn() && resource != null && existing().email == (request.auth.token.email != null ? request.auth.token.email : ''));
+      allow create: if isSignedIn() && isValidId(mappingId);
+      allow update, delete: if isAdmin() || (isSignedIn() && resource != null && existing().email == (request.auth.token.email != null ? request.auth.token.email : '') && isValidId(mappingId));
+    }
+
+    match /taxpayer_requests/{requestId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidTaxpayerRequest(incoming()) && isValidId(requestId);
+      allow update: if isSignedIn() && (isAdmin() || (resource.data.userId == request.auth.uid && incoming().status == existing().status));
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid && isValidId(requestId));
     }
   }
 }
