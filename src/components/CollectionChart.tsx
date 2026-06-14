@@ -141,7 +141,7 @@ export const CollectionChart: React.FC = () => {
     >
       {/* Decorative background logo */}
       <div className="absolute top-0 right-0 p-8 opacity-5">
-        <Landmark className="w-32 h-32 text-indigo-500" />
+        <Landmark className="w-32 h-32 text-blue-500" />
       </div>
 
       {/* Header controls section */}
@@ -152,13 +152,13 @@ export const CollectionChart: React.FC = () => {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-500 text-xs font-bold">
-            <Filter className="w-3.5 h-3.5 text-indigo-400" />
+            <Filter className="w-3.5 h-3.5 text-blue-400" />
             <span className="uppercase tracking-wider text-[9px]">Brgy:</span>
           </div>
           <select
             value={selectedBarangay}
             onChange={e => setSelectedBarangay(e.target.value)}
-            className="px-4 py-1.5 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl text-xs font-bold text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all min-w-[150px] shadow-lg leading-relaxed justify-between flex items-center"
+            className="px-4 py-1.5 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl text-xs font-bold text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer transition-all min-w-[150px] shadow-lg leading-relaxed justify-between flex items-center"
           >
             <option value="all" className="bg-slate-950">All Barangays</option>
             {uniqueBarangays.map(b => (
@@ -192,7 +192,7 @@ export const CollectionChart: React.FC = () => {
       <div className="h-[400px] w-full flex-1 min-h-[300px] z-10">
         {loading ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-2">
-            <div className="w-8 h-8 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+            <div className="w-8 h-8 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
             <span className="text-[10px] uppercase tracking-widest font-bold">Querying receipts dataset...</span>
           </div>
         ) : chartData.length === 0 ? (

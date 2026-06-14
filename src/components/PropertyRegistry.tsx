@@ -12,14 +12,15 @@ import {
   serverTimestamp,
   db,
   handleFirestoreError,
-  OperationType 
+  OperationType,
+  writeBatch
 } from "../lib/firebase";
 import { useAuth } from "../AuthContext";
 import { addToOfflineQueue } from "../lib/offlineSync";
 import { Property, PropertyClassification, Delinquency } from "../types";
 import { cn, formatCurrency } from "../lib/utils";
 import { DIPACULAO_BARANGAYS } from "../constants";
-import { Plus, Search, Filter, Edit2, Check, X, Building2, Upload, Eye, ChevronDown, ChevronRight, Receipt, Trash2, RotateCcw } from "lucide-react";
+import { Plus, Search, Filter, Edit2, Check, X, Building2, Upload, Eye, ChevronDown, ChevronRight, Receipt, Trash2, RotateCcw, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { logAudit } from "../lib/audit";
 import ExcelImporter from "./ExcelImporter";
@@ -56,13 +57,15 @@ interface PropertyRegistryProps {
   isAdmin?: boolean;
   initialTab?: "Active" | "Archived";
   showTabsSelector?: boolean;
+  onPostPayment?: (prop: Property) => void;
 }
 
 const PropertyRegistry: React.FC<PropertyRegistryProps> = ({ 
   isEncoder, 
   isAdmin = false, 
   initialTab = "Active",
-  showTabsSelector = true 
+  showTabsSelector = true,
+  onPostPayment
 }) => {
   const { profile } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
@@ -361,34 +364,44 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
   const handlePermanentDeleteConfirm = async () => {
     if (!adminAuthDialog.property) return;
     const property = adminAuthDialog.property;
+    setAdminAuthDialog({ isOpen: false, property: null });
+
     try {
+      const batch = writeBatch(db);
+      
       // Find delinquencies and delete them
       const delinqQuery = query(collection(db, "delinquencies"), where("propertyId", "==", property.id));
       const delinqSnap = await getDocs(delinqQuery);
       for (const d of delinqSnap.docs) {
-        await deleteDoc(doc(db, "delinquencies", d.id));
-        await logAudit("DELETE", "Delinquency", d.id, d.data(), null);
+        batch.delete(doc(db, "delinquencies", d.id));
       }
       
       // Find payments and delete them
       const paymentsQuery = query(collection(db, "payments"), where("propertyId", "==", property.id));
       const paymentsSnap = await getDocs(paymentsQuery);
       for (const p of paymentsSnap.docs) {
-        await deleteDoc(doc(db, "payments", p.id));
-        await logAudit("DELETE", "Payment", p.id, p.data(), null);
+        batch.delete(doc(db, "payments", p.id));
       }
 
       // Find taxpayer requests and delete them
       const reqQuery = query(collection(db, "taxpayer_requests"), where("propertyId", "==", property.id));
       const reqSnap = await getDocs(reqQuery);
       for (const r of reqSnap.docs) {
-        await deleteDoc(doc(db, "taxpayer_requests", r.id));
-        await logAudit("DELETE", "TaxpayerRequest", r.id, r.data(), null);
+        batch.delete(doc(db, "taxpayer_requests", r.id));
       }
 
       // Delete property
-      await deleteDoc(doc(db, "properties", property.id));
+      batch.delete(doc(db, "properties", property.id));
+
+      // Commit the transaction
+      await batch.commit();
+
+      // Log audit events after successful commit
+      for (const d of delinqSnap.docs) await logAudit("DELETE", "Delinquency", d.id, d.data(), null);
+      for (const p of paymentsSnap.docs) await logAudit("DELETE", "Payment", p.id, p.data(), null);
+      for (const r of reqSnap.docs) await logAudit("DELETE", "TaxpayerRequest", r.id, r.data(), null);
       await logAudit("DELETE", "Property", property.id, property, null);
+
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, "properties");
     }
@@ -562,14 +575,14 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
           <div className="flex gap-3">
              <button 
               onClick={() => setIsImporting(true)}
-              className="flex items-center gap-2 px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-lg hover:bg-indigo-500/10 transition font-bold text-xs uppercase tracking-wider"
+              className="flex items-center gap-2 px-4 py-2 border border-blue-500/30 text-blue-400 rounded-lg hover:bg-blue-500/10 transition font-bold text-xs uppercase tracking-wider"
             >
               <Upload className="w-4 h-4" />
               Migrate Data
             </button>
             <button 
               onClick={() => setIsAdding(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition shadow-lg shadow-indigo-500/20 font-bold text-xs uppercase tracking-wider"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition shadow-lg shadow-blue-500/20 font-bold text-xs uppercase tracking-wider"
             >
               <Plus className="w-4 h-4" />
               Register Property
@@ -589,7 +602,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                 className={cn(
                   "px-4 py-2 rounded-xl text-sm font-bold transition-all",
                   activeTab === 'Active' 
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" 
+                    ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
                     : "bg-slate-800 text-slate-400 hover:text-slate-200"
                 )}
               >
@@ -600,7 +613,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                 className={cn(
                   "px-4 py-2 rounded-xl text-sm font-bold transition-all",
                   activeTab === 'Archived' 
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" 
+                    ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
                     : "bg-slate-800 text-slate-400 hover:text-slate-200"
                 )}
               >
@@ -620,7 +633,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
               <input 
                 type="text" 
                 placeholder="Search by Tax Dec, PIN, Owner, or Barangay..." 
-                className="w-full pl-10 pr-4 py-2 border border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-950 text-slate-300 text-sm transition-all"
+                className="w-full pl-10 pr-4 py-2 border border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-950 text-slate-300 text-sm transition-all"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
               />
@@ -629,7 +642,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
               <select
                 value={selectedBarangay}
                 onChange={e => setSelectedBarangay(e.target.value)}
-                className="w-full sm:w-auto min-w-[200px] pl-4 pr-10 py-2 border border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-950 text-slate-300 text-sm transition-all appearance-none cursor-pointer"
+                className="w-full sm:w-auto min-w-[200px] pl-4 pr-10 py-2 border border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-950 text-slate-300 text-sm transition-all appearance-none cursor-pointer"
               >
                 <option value="" className="bg-slate-950 text-slate-300">All Barangays</option>
                 {DIPACULAO_BARANGAYS.map(brgy => (
@@ -651,7 +664,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ownership Block</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Barangay</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Assessment</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ops</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -663,11 +676,11 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                 const isPartialTd = (property as any).isPartialTd;
                 const isExact = exactTd || exactPin || exactOwner;
                 return (
-                <tr key={property.id} className={cn("transition-colors group", isExact ? "bg-amber-500/10 hover:bg-amber-500/20" : isPartialTd ? "bg-amber-500/[0.03] hover:bg-amber-500/[0.08]" : "hover:bg-indigo-500/[0.02]")}>
+                <tr key={property.id} className={cn("transition-colors group", isExact ? "bg-amber-500/10 hover:bg-amber-500/20" : isPartialTd ? "bg-amber-500/[0.03] hover:bg-amber-500/[0.08]" : "hover:bg-blue-500/[0.02]")}>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className={cn("p-2 rounded-xl border transition-all", isExact ? "bg-amber-500/20 border-amber-500/30 group-hover:bg-amber-500/30" : isPartialTd ? "bg-amber-500/10 border-amber-500/20" : "bg-slate-800 group-hover:bg-slate-700 border-slate-700 group-hover:border-slate-600")}>
-                        <Building2 className={cn("w-4 h-4", (isExact || isPartialTd) ? "text-amber-500" : "text-indigo-400")} />
+                        <Building2 className={cn("w-4 h-4", (isExact || isPartialTd) ? "text-amber-500" : "text-blue-400")} />
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
@@ -704,15 +717,15 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                   <td className="px-6 py-4 text-sm text-slate-400">{property.barangay}</td>
                   <td className="px-6 py-4 text-sm font-bold text-emerald-400">{formatCurrency(property.assessedValue)}</td>
                   <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="table-actions">
                       {activeTab === 'Active' ? (
                         <>
                           <button 
                             onClick={() => setViewingProperty(property)}
-                            className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-xl transition-all"
+                            className="btn-action-primary"
                             title="View RPTAR"
                           >
-                            <Eye className="w-4 h-4" />
+                            <Eye className="w-4 h-4" /> View
                           </button>
                           {isEncoder && (
                             <button 
@@ -721,19 +734,19 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                                 setFormData(property);
                                 setIsAdding(true);
                               }}
-                              className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-xl transition-all"
+                              className="btn-action-primary"
                               title="Modify Record"
                             >
-                              <Edit2 className="w-4 h-4" />
+                              <Edit2 className="w-4 h-4" /> Edit
                             </button>
                           )}
                           {isAdmin && (
                             <button 
                               onClick={() => handleDeleteProperty(property)}
-                              className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
+                              className="btn-action-destructive"
                               title="Archive Property"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-4 h-4" /> Archive
                             </button>
                           )}
                         </>
@@ -741,18 +754,18 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                         <>
                           <button 
                             onClick={() => handleRestoreProperty(property)}
-                            className="px-3 py-1 font-bold text-xs text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg transition-all"
+                            className="btn-action-positive"
                             title="Restore Property"
                           >
-                            RESTORE
+                            <RefreshCw className="w-4 h-4" /> Restore
                           </button>
                           {isAdmin && (
                             <button 
                               onClick={() => handleDeleteProperty(property)}
-                              className="px-3 py-1 font-bold text-xs text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-all"
+                              className="btn-action-destructive"
                               title="Permanently Delete"
                             >
-                              DELETE
+                              <Trash2 className="w-4 h-4" /> Delete
                             </button>
                           )}
                         </>
@@ -782,8 +795,8 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
             >
               <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-indigo-500/10 rounded-xl">
-                    <Building2 className="w-5 h-5 text-indigo-400" />
+                  <div className="p-2 bg-blue-500/10 rounded-xl">
+                    <Building2 className="w-5 h-5 text-blue-400" />
                   </div>
                   <h3 className="text-xl font-bold text-white tracking-tight">
                     {editingId ? "Modify Property Record" : "Property Registration Form"}
@@ -800,8 +813,8 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
               <form onSubmit={preSubmitCheck} className="p-8 space-y-8 max-h-[70vh] overflow-y-auto">
                 {/* Section I */}
                 <div className="space-y-4">
-                  <h4 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                     <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                  <h4 className="text-xs font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                     <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
                      I. RECORD OF OWNERSHIP
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -809,7 +822,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Complete Name of Owner</label>
                       <input 
                         className={cn(
-                          "w-full px-4 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
+                          "w-full px-4 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all",
                           errors.ownerName ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
                         )}
                         value={formData.ownerName}
@@ -824,7 +837,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Address</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.ownerAddress}
                         onChange={e => setFormData({...formData, ownerAddress: e.target.value})}
                         required
@@ -833,7 +846,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Administrator/Beneficial User</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.administratorName}
                         onChange={e => setFormData({...formData, administratorName: e.target.value})}
                       />
@@ -841,7 +854,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Administrator Address</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.administratorAddress}
                         onChange={e => setFormData({...formData, administratorAddress: e.target.value})}
                       />
@@ -853,7 +866,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                           <input 
                             type="checkbox" 
                             id="yearOnly"
-                            className="w-3 h-3 rounded bg-slate-950 border-slate-800 text-indigo-500 focus:ring-offset-0 focus:ring-0"
+                            className="w-3 h-3 rounded bg-slate-950 border-slate-800 text-blue-500 focus:ring-offset-0 focus:ring-0"
                             checked={!formData.effectivityDate?.includes('-')}
                             onChange={e => {
                               if (e.target.checked) {
@@ -868,7 +881,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                       </div>
                       {!formData.effectivityDate?.includes('-') ? (
                         <select 
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer"
+                          className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer"
                           value={formData.effectivityDate}
                           onChange={e => setFormData({...formData, effectivityDate: e.target.value})}
                           required
@@ -881,7 +894,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                       ) : (
                         <input 
                           type="date"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all [color-scheme:dark]"
+                          className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all [color-scheme:dark]"
                           value={formData.effectivityDate}
                           onChange={e => setFormData({...formData, effectivityDate: e.target.value})}
                           required
@@ -892,7 +905,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Tax Declaration Number</label>
                       <input 
                         className={cn(
-                          "w-full px-4 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono",
+                          "w-full px-4 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono",
                           errors.tdNumber ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
                         )}
                         value={formData.tdNumber}
@@ -909,15 +922,15 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
 
                 {/* Section II */}
                 <div className="space-y-4">
-                  <h4 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                     <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                  <h4 className="text-xs font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                     <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
                      II. TECHNICAL PROPERTY DESCRIPTION
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Property Index No. (PIN) <span className="text-slate-700 italic">(Optional)</span></label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono"
                         value={formData.pin}
                         onChange={e => setFormData({...formData, pin: e.target.value})}
                       />
@@ -926,7 +939,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Detailed Location</label>
                       <input 
                         className={cn(
-                          "w-full px-4 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
+                          "w-full px-4 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all",
                           errors.detailedLocation ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
                         )}
                         value={formData.detailedLocation}
@@ -941,7 +954,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Street</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.street}
                         onChange={e => setFormData({...formData, street: e.target.value})}
                       />
@@ -949,7 +962,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Barangay</label>
                       <select 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer"
                         value={formData.barangay}
                         onChange={e => setFormData({...formData, barangay: e.target.value})}
                         required
@@ -979,7 +992,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Lot No.</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.lotNo}
                         onChange={e => setFormData({...formData, lotNo: e.target.value})}
                       />
@@ -987,7 +1000,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Blk. No.</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.blkNo}
                         onChange={e => setFormData({...formData, blkNo: e.target.value})}
                       />
@@ -995,7 +1008,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">OCT / TCT</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.octTct}
                         onChange={e => setFormData({...formData, octTct: e.target.value})}
                       />
@@ -1003,7 +1016,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">CCT / CLOA</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.cctCloa}
                         onChange={e => setFormData({...formData, cctCloa: e.target.value})}
                       />
@@ -1013,15 +1026,15 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
 
                 {/* Section III */}
                 <div className="space-y-4">
-                  <h4 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                     <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                  <h4 className="text-xs font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                     <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
                      III. KIND OF PROPERTY ASSESSED
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Classification</label>
                       <select 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer"
                         value={formData.classification}
                         onChange={e => setFormData({...formData, classification: e.target.value as any})}
                         required
@@ -1036,7 +1049,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                       <input 
                         placeholder="e.g. 500 or 1.2 ha"
                         className={cn(
-                          "w-full px-4 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
+                          "w-full px-4 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all",
                           errors.area ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
                         )}
                         value={formData.area}
@@ -1060,7 +1073,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                         <input 
                           type="text"
                           className={cn(
-                            "w-full pl-8 pr-4 py-2 bg-slate-950 border rounded-xl text-emerald-400 font-bold focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
+                            "w-full pl-8 pr-4 py-2 bg-slate-950 border rounded-xl text-emerald-400 font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all",
                             errors.assessedValue ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
                           )}
                           value={formData.assessedValue ? formData.assessedValue.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""}
@@ -1084,15 +1097,15 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
 
                 {/* Section IV */}
                 <div className="space-y-4">
-                  <h4 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                     <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                  <h4 className="text-xs font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                     <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
                      IV. REMARKS
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Previous TD / ARP No.</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.previousTdNo}
                         onChange={e => setFormData({...formData, previousTdNo: e.target.value})}
                       />
@@ -1100,7 +1113,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Previous Owner</label>
                       <input 
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         value={formData.previousOwner}
                         onChange={e => setFormData({...formData, previousOwner: e.target.value})}
                       />
@@ -1112,7 +1125,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                         <input 
                           type="text"
                           className={cn(
-                            "w-full pl-8 pr-4 py-2 bg-slate-950 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold",
+                            "w-full pl-8 pr-4 py-2 bg-slate-950 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold",
                             errors.previousAssessedValue ? "border-red-500/50 bg-red-500/5 text-red-400" : "border-slate-800 text-slate-400"
                           )}
                           value={formData.previousAssessedValue ? formData.previousAssessedValue.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""}
@@ -1151,7 +1164,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
                   </button>
                   <button 
                     type="submit" 
-                    className="flex-[2] px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-500 transition shadow-xl shadow-indigo-600/20 font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2"
+                    className="flex-[2] px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition shadow-xl shadow-blue-600/20 font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2"
                   >
                     <Check className="w-4 h-4" />
                     {editingId ? "Update Registry Record" : "Finalize Registration"}
@@ -1168,6 +1181,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
           <PropertyDetails 
             property={viewingProperty} 
             onClose={() => setViewingProperty(null)} 
+            onPostPayment={onPostPayment}
           />
         )}
       </AnimatePresence>

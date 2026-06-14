@@ -19,9 +19,10 @@ import { RPTARPrintView } from "./RPTARPrintView";
 interface PropertyDetailsProps {
   property: Property;
   onClose: () => void;
+  onPostPayment?: (prop: Property) => void;
 }
 
-const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) => {
+const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, onPostPayment }) => {
   const [history, setHistory] = useState<Delinquency[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,8 +87,8 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
         {/* Header */}
         <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-center justify-center">
-              <Building2 className="w-6 h-6 text-indigo-400" />
+            <div className="w-12 h-12 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-center">
+              <Building2 className="w-6 h-6 text-blue-400" />
             </div>
             <div>
               <h3 className="text-xl font-bold text-white tracking-tight">Real Property Tax Account Register (RPTAR)</h3>
@@ -95,6 +96,15 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {onPostPayment && (
+              <button 
+                onClick={() => onPostPayment(property)}
+                className="hidden md:flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold border border-blue-500/50 transition-colors shadow-lg shadow-blue-600/20"
+              >
+                <Receipt className="w-4 h-4" />
+                POST PAYMENT RECORD
+              </button>
+            )}
             <button 
               onClick={() => setShowRptar(true)}
               className="hidden md:flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-slate-700 transition-colors"
@@ -118,7 +128,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
             <div className="p-6 bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-4">
-                  <div className="p-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-indigo-400">
+                  <div className="p-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400">
                     <User className="w-4 h-4" />
                   </div>
                   <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
@@ -141,7 +151,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
                   <div className="grid grid-cols-2 gap-4 pt-2">
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Tax Dec No.</p>
-                      <p className="text-xs font-mono font-bold text-indigo-400 truncate">{property.tdNumber}</p>
+                      <p className="text-xs font-mono font-bold text-blue-400 truncate">{property.tdNumber}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Effectivity</p>
@@ -250,7 +260,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
           {/* Middle Row: Financial Summary */}
           <div className="p-6 bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl mb-8 transition-all">
             <div className="flex items-center gap-2 mb-6">
-              <div className="p-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-indigo-400">
+              <div className="p-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400">
                 <Receipt className="w-4 h-4" />
               </div>
               <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
@@ -309,7 +319,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-extrabold text-white tracking-wider uppercase flex items-center gap-2">
-                <Clock className="w-4 h-4 text-indigo-400" />
+                <Clock className="w-4 h-4 text-blue-400" />
                 Record of Taxes Due and Payment
               </h4>
               <div className="px-3 py-1 bg-slate-800 bg-opacity-70 rounded-full text-[10px] font-bold text-slate-400 border border-slate-700">
@@ -319,7 +329,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
 
             {loading ? (
               <div className="flex items-center justify-center py-20">
-                <div className="w-8 h-8 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+                <div className="w-8 h-8 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
               </div>
             ) : history.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 bg-slate-950/30 rounded-3xl border border-slate-800/50 border-dashed">
@@ -341,7 +351,9 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
                   });
                   return sortedGrouped.map((row) => {
                     const firstYearRecord = history.find(h => h.year === row.years[0]);
-                    const status = row.records.some(r => r.status === "Delinquent" && !payments.some(p => p.taxYear === r.year && p.status === "Active")) ? "Delinquent" : "Paid";
+                    const isUnpaidDelinq = row.records.some(r => r.status === "Delinquent" && !payments.some(p => p.taxYear === r.year && p.status === "Active"));
+                    const isUnpaidPending = row.records.some(r => r.status === "Pending" && !payments.some(p => p.taxYear === r.year && p.status === "Active"));
+                    const status = isUnpaidDelinq ? "Delinquent" : (isUnpaidPending ? "Pending" : "Paid");
 
                     return (
                       <div 
@@ -355,7 +367,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
                           <div className="flex items-center gap-4">
                             <div className={cn(
                               "min-w-[40px] px-2 h-10 rounded-lg flex items-center justify-center font-bold text-xs",
-                              status === "Delinquent" ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              status === "Delinquent" ? "bg-red-500/10 text-red-400 border border-red-500/20" : status === "Pending" ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                             )}>
                               {row.yearDisplay}
                             </div>
@@ -363,7 +375,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose }) 
                               <p className="text-sm font-bold text-white">Tax Year {row.yearDisplay}</p>
                               <span className={cn(
                                 "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full inline-block mt-1",
-                                status === "Delinquent" ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
+                                status === "Delinquent" ? "bg-red-500/10 text-red-500" : status === "Pending" ? "bg-blue-500/10 text-blue-400" : "bg-emerald-500/10 text-emerald-500"
                               )}>
                                 {row.years.length > 1 ? `${status} (Grouped)` : status}
                               </span>

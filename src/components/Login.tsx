@@ -236,7 +236,7 @@ const Login: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#0B1528] text-slate-100 flex items-center justify-center p-4 md:p-10 relative overflow-hidden w-full select-none">
       {/* Dynamic Background visual ornaments */}
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-500/5 blur-[120px] rounded-full pointer-events-none z-0" />
+      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-500/5 blur-[120px] rounded-full pointer-events-none z-0" />
       <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none z-0" />
 
       <motion.div 
@@ -255,14 +255,14 @@ const Login: React.FC = () => {
                   <img src="/logo.png" alt="Dipaculao Logo" className="w-10 h-10 object-contain" referrerPolicy="no-referrer" />
                 </div>
                 <div>
-                  <h4 className="text-[10px] font-black tracking-[0.2em] text-indigo-500 uppercase font-mono">Dipaculao Aurora</h4>
+                  <h4 className="text-[10px] font-black tracking-[0.2em] text-blue-500 uppercase font-mono">Dipaculao Aurora</h4>
                   <h2 className="text-sm font-bold text-slate-300 leading-none">Government RPT Network</h2>
                 </div>
               </div>
 
               <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight leading-none mb-6">
                 Web-Based <br className="hidden md:block"/>
-                <span className="text-indigo-400">Real Property</span> <br />
+                <span className="text-blue-400">Real Property</span> <br />
                 Tax System
               </h1>
 
@@ -273,7 +273,7 @@ const Login: React.FC = () => {
 
             <div className="space-y-4">
               <div className="flex items-start gap-4 p-4 rounded-2xl bg-slate-950/40 border border-slate-800/80">
-                <ShieldCheck className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-0.5">Strict Ledger Isolation</h4>
                   <p className="text-[10px] text-slate-500 leading-normal">
@@ -349,7 +349,7 @@ const Login: React.FC = () => {
                         required
                         type="text"
                         placeholder="Taxpayer Registered Name"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
                         value={regData.fullName}
                         onChange={e => setRegData(p => ({ ...p, fullName: e.target.value }))}
                       />
@@ -360,7 +360,7 @@ const Login: React.FC = () => {
                       <input
                         type="email"
                         placeholder="Offline: system will auto-generate if empty"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
                         value={regData.email}
                         onChange={e => setRegData(p => ({ ...p, email: e.target.value }))}
                       />
@@ -374,7 +374,7 @@ const Login: React.FC = () => {
                         required
                         type="text"
                         placeholder="e.g. maria_santos"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
                         value={regData.username}
                         onChange={e => setRegData(p => ({ ...p, username: e.target.value.replace(/\s+/g, '') }))}
                       />
@@ -386,7 +386,7 @@ const Login: React.FC = () => {
                         required
                         type="password"
                         placeholder="Must exceed 6 characters"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
                         value={regData.password}
                         onChange={e => setRegData(p => ({ ...p, password: e.target.value }))}
                       />
@@ -394,7 +394,7 @@ const Login: React.FC = () => {
                   </div>
 
                   <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
-                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                    <h3 className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
                       <FileText className="w-3.5 h-3.5" />
                       Tax Registry Match Inputs
                     </h3>
@@ -405,7 +405,7 @@ const Login: React.FC = () => {
                         <input
                           type="text"
                           placeholder="e.g. TD-2025-0012"
-                          className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
                           value={regData.tdNumber}
                           onChange={e => setRegData(p => ({ ...p, tdNumber: e.target.value }))}
                         />
@@ -416,7 +416,7 @@ const Login: React.FC = () => {
                         <input
                           type="text"
                           placeholder="e.g. 012-04-001..."
-                          className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
                           value={regData.pin}
                           onChange={e => setRegData(p => ({ ...p, pin: e.target.value }))}
                         />
@@ -426,13 +426,13 @@ const Login: React.FC = () => {
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-center pr-1">
                         <label className="text-[9px] font-black text-slate-550 uppercase tracking-wider block font-sans">Official Assessed Value (₱) *</label>
-                        <span className="text-[8px] text-indigo-400 font-bold uppercase block tracking-wider">Strict Security Check Target</span>
+                        <span className="text-[8px] text-blue-400 font-bold uppercase block tracking-wider">Strict Security Check Target</span>
                       </div>
                       <input
                         required
                         type="number"
                         placeholder="Exact number from Assessor's Declaration (e.g., 24000)"
-                        className="w-full bg-slate-950 border border-slate-850 rounded-xl py-3 px-3 text-xs text-white font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                        className="w-full bg-slate-950 border border-slate-850 rounded-xl py-3 px-3 text-xs text-white font-mono focus:outline-none focus:border-blue-500 transition-colors"
                         value={regData.assessedValue}
                         onChange={e => setRegData(p => ({ ...p, assessedValue: e.target.value }))}
                       />
@@ -472,7 +472,7 @@ const Login: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => { setIsRegistering(false); setError(null); setMsg(null); }}
-                      className="text-indigo-400 hover:text-indigo-300 font-bold text-[10px] uppercase tracking-widest"
+                      className="text-blue-400 hover:text-blue-300 font-bold text-[10px] uppercase tracking-widest"
                     >
                       &larr; Already Registered? Return to Login
                     </button>
@@ -490,9 +490,9 @@ const Login: React.FC = () => {
                 >
                   <div className="border-b border-slate-800 pb-3 mb-2">
                     <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                      {selectedRole === "Resident" && <User className="w-4 h-4 text-indigo-400" />}
-                      {selectedRole === "Staff" && <Users className="w-4 h-4 text-indigo-400" />}
-                      {selectedRole === "Administrator" && <ShieldCheck className="w-4 h-4 text-indigo-400" />}
+                      {selectedRole === "Resident" && <User className="w-4 h-4 text-blue-400" />}
+                      {selectedRole === "Staff" && <Users className="w-4 h-4 text-blue-400" />}
+                      {selectedRole === "Administrator" && <ShieldCheck className="w-4 h-4 text-blue-400" />}
                       {selectedRole} Access Validation
                     </h3>
                     <p className="text-[10px] text-slate-500 mt-1">
@@ -511,7 +511,7 @@ const Login: React.FC = () => {
                       <input
                         required
                         type="text"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-12 pr-4 text-xs text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none placeholder:text-slate-700"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-12 pr-4 text-xs text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none placeholder:text-slate-700"
                         placeholder={selectedRole === "Resident" ? "Email, username, or e.g. TD-2025-0012" : "Email address or username"}
                         value={loginData.usernameOrEmail}
                         onChange={e => setLoginData(p => ({ ...p, usernameOrEmail: e.target.value }))}
@@ -526,7 +526,7 @@ const Login: React.FC = () => {
                         <button 
                           type="button" 
                           onClick={() => { setIsResetting(true); setError(null); setMsg(null); }}
-                          className="text-[9px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-wider"
+                          className="text-[9px] text-blue-400 hover:text-blue-300 font-bold uppercase tracking-wider"
                         >
                           Reset?
                         </button>
@@ -536,7 +536,7 @@ const Login: React.FC = () => {
                         <input
                           required
                           type={showPassword ? "text" : "password"}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-12 pr-12 text-xs text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none placeholder:text-slate-700"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-12 pr-12 text-xs text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none placeholder:text-slate-700"
                           placeholder="••••••••"
                           value={loginData.password}
                           onChange={e => setLoginData(p => ({ ...p, password: e.target.value }))}
@@ -560,9 +560,9 @@ const Login: React.FC = () => {
                   )}
 
                   {msg && (
-                    <div className="p-4 bg-indigo-500/10 border border-indigo-500/10 rounded-2xl flex items-start gap-3">
-                      <CheckCircle className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                      <p className="text-[10px] text-indigo-300 leading-normal font-semibold">{msg}</p>
+                    <div className="p-4 bg-blue-500/10 border border-blue-500/10 rounded-2xl flex items-start gap-3">
+                      <CheckCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-blue-300 leading-normal font-semibold">{msg}</p>
                     </div>
                   )}
 
@@ -588,7 +588,7 @@ const Login: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => { setIsResetting(false); setError(null); setMsg(null); }}
-                        className="text-indigo-400 hover:text-indigo-300 font-bold text-[10px] uppercase tracking-widest"
+                        className="text-blue-400 hover:text-blue-300 font-bold text-[10px] uppercase tracking-widest"
                       >
                         Return to Validate
                       </button>

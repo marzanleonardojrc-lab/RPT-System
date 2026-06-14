@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Property, Delinquency, Payment } from "../types";
 import { groupDelinquenciesByPenaltyRule, calculateTotalDue } from "../lib/taxCalculations";
-import { formatDate } from "../lib/utils";
+import { formatDate, resolveModernColors } from "../lib/utils";
+import { Download } from "lucide-react";
 
 interface RPTARPrintViewProps {
   property: Property;
@@ -16,8 +18,84 @@ export const RPTARPrintView: React.FC<RPTARPrintViewProps> = ({
   payments,
   onClose,
 }) => {
+  const [isSavingPdf, setIsSavingPdf] = useState(false);
+  const printAreaRef = useRef<HTMLDivElement>(null);
+
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleSavePDF = () => {
+    const element = printAreaRef.current;
+    if (!element) return;
+
+    const cleanOwnerName = property.ownerName.trim().replace(/[^a-zA-Z0-9_\- ]/g, "").replace(/\s+/g, "_");
+    const filename = `RPTAR_${cleanOwnerName}.pdf`;
+
+    const opt = {
+      margin:       0.25,
+      filename:     filename,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { 
+        scale: 2.5, 
+        useCORS: true,
+        letterRendering: true,
+        logging: false
+      },
+      jsPDF:        { unit: 'in', format: [8.5, 11], orientation: 'portrait' }
+    } as any;
+
+    setIsSavingPdf(true);
+
+    const originalGetComputedStyle = window.getComputedStyle;
+    window.getComputedStyle = function(elt, pseudoElt) {
+      const originalDecl = originalGetComputedStyle.call(window, elt, pseudoElt);
+      return new Proxy(originalDecl, {
+        get(target, prop) {
+          if (prop === "getPropertyValue") {
+            return function(propertyName: string) {
+              if (typeof propertyName === "string" && (propertyName.startsWith("text-decoration") || propertyName === "text-decoration-line")) {
+                const hasUnderline = (typeof elt.closest === "function") && (elt.closest(".underline") !== null);
+                return hasUnderline ? "underline" : "none";
+              }
+              const val = target.getPropertyValue(propertyName);
+              return resolveModernColors(val);
+            };
+          }
+          if (typeof prop === "string" && (prop.startsWith("textDecoration") || prop === "textDecorationLine")) {
+            const hasUnderline = (typeof elt.closest === "function") && (elt.closest(".underline") !== null);
+            return hasUnderline ? "underline" : "none";
+          }
+          const val = Reflect.get(target, prop, target);
+          if (typeof val === "function") {
+            return val.bind(target);
+          }
+          if (typeof val === "string") {
+            return resolveModernColors(val);
+          }
+          return val;
+        }
+      });
+    };
+    
+    // @ts-ignore
+    import('html2pdf.js').then((html2pdfModule) => {
+      const html2pdf = html2pdfModule.default;
+      html2pdf().set(opt).from(element).save().then(() => {
+        setIsSavingPdf(false);
+        window.getComputedStyle = originalGetComputedStyle;
+      }).catch((err: any) => {
+        console.error("PDF generation failed:", err);
+        setIsSavingPdf(false);
+        window.getComputedStyle = originalGetComputedStyle;
+        window.print();
+      });
+    }).catch((err) => {
+      console.error("Failed to load html2pdf.js dynamically:", err);
+      setIsSavingPdf(false);
+      window.getComputedStyle = originalGetComputedStyle;
+      window.print();
+    });
   };
 
   // Generate Ledger Rows
@@ -92,7 +170,7 @@ export const RPTARPrintView: React.FC<RPTARPrintViewProps> = ({
           years: [item.year],
           orNumber: p.orNumber,
           date: p.paymentDate,
-          clerk: p.recordedBy ? (p.recordedBy.includes('@') ? p.recordedBy.split('@')[0].toUpperCase() : p.recordedBy.toUpperCase()) : '',
+          clerk: (p.deputy ? p.deputy.toUpperCase() + '/' : '') + (p.recordedBy ? (p.recordedBy.includes('@') ? p.recordedBy.split('@')[0].toUpperCase() : p.recordedBy.toUpperCase()) : ''),
           status: p.status,
           basicPaid: p.status === 'Voided' ? 0 : p.basicPaid,
           sefPaid: p.status === 'Voided' ? 0 : p.sefPaid,
@@ -283,8 +361,8 @@ export const RPTARPrintView: React.FC<RPTARPrintViewProps> = ({
     return val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
-  return (
-    <div className="fixed inset-0 bg-white text-black z-[9999] overflow-auto">
+  const modalContent = (
+    <div className="fixed inset-0 bg-white text-black z-[100000] overflow-auto">
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           @page {
@@ -375,17 +453,29 @@ export const RPTARPrintView: React.FC<RPTARPrintViewProps> = ({
             Print Preview: Ensure Paper Size is set to "8.5 x 13" or "Legal" with Landscape orientation in Print Dialog.
           </span>
         </div>
-        <button 
-          id="rptar-print-btn"
-          onClick={handlePrint}
-          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow-sm cursor-pointer"
-        >
-          Print Document
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSavePDF}
+            disabled={isSavingPdf}
+            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 disabled:bg-slate-100 disabled:text-slate-400 text-slate-800 rounded font-medium transition-colors cursor-pointer flex items-center gap-2"
+            title="Saves document as a PDF file"
+          >
+            <Download className="w-4 h-4" />
+            {isSavingPdf ? "Saving PDF..." : "Save PDF"}
+          </button>
+          <button 
+            id="rptar-print-btn"
+            onClick={handlePrint}
+            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow-sm cursor-pointer"
+          >
+            Print Document
+          </button>
+        </div>
       </div>
 
       {/* Main Folio Document Frame */}
-      <div className="p-6 rptar-paper">
+      <div ref={printAreaRef} className="p-6 rptar-paper printable-page-container">
         
         {/* Header Section (Stacked 5 lines, centered, uppercase, single-spaced) */}
         <div className="text-center mb-5 flex flex-col gap-0.5 leading-tight tracking-wider" id="rptar-header">
@@ -651,4 +741,6 @@ export const RPTARPrintView: React.FC<RPTARPrintViewProps> = ({
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 };

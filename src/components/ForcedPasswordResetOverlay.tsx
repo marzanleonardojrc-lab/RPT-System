@@ -57,8 +57,8 @@ const ForcedPasswordResetOverlay: React.FC<ForcedPasswordResetOverlayProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#0B1528] flex items-center justify-center p-4 md:p-8 relative selection:bg-indigo-500/30">
-      <div className="absolute -top-40 -left-40 w-96 h-96 bg-indigo-500/10 blur-[120px] rounded-full" />
+    <div className="min-h-screen bg-[#0B1528] flex items-center justify-center p-4 md:p-8 relative selection:bg-blue-500/30">
+      <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-500/10 blur-[120px] rounded-full" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-cyan-500/10 blur-[120px] rounded-full" />
 
       <motion.div
@@ -67,8 +67,8 @@ const ForcedPasswordResetOverlay: React.FC<ForcedPasswordResetOverlayProps> = ({
         className="w-full max-w-lg bg-slate-900/60 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-8 md:p-12 shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] z-10"
       >
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <ShieldCheck className="w-8 h-8 text-indigo-400" />
+          <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <ShieldCheck className="w-8 h-8 text-blue-400" />
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">First-Time Setup required</h1>
           <p className="text-slate-400 text-xs mt-2 leading-relaxed">
@@ -95,7 +95,7 @@ const ForcedPasswordResetOverlay: React.FC<ForcedPasswordResetOverlayProps> = ({
                 <input
                   required
                   type={showPass ? "text" : "password"}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-12 text-sm text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none placeholder:text-slate-700 font-mono"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-12 text-sm text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none placeholder:text-slate-700 font-mono"
                   placeholder="At least 6 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -117,7 +117,7 @@ const ForcedPasswordResetOverlay: React.FC<ForcedPasswordResetOverlayProps> = ({
                 <input
                   required
                   type={showPass ? "text" : "password"}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-12 text-sm text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none placeholder:text-slate-700 font-mono"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-12 text-sm text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none placeholder:text-slate-700 font-mono"
                   placeholder="Re-enter your new password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}

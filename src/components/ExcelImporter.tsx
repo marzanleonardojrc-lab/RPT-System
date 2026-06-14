@@ -33,7 +33,6 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
   };
   const [file, setFile] = useState<File | null>(null);
   const [overwriteDuplicates, setOverwriteDuplicates] = useState(true);
-  const [importerMode, setImporterMode] = useState<"upload" | "revise">("upload");
   const [importedProps, setImportedProps] = useState<any[]>([]);
   const [loadingProps, setLoadingProps] = useState(false);
   const [editingPropId, setEditingPropId] = useState<string | null>(null);
@@ -44,130 +43,10 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
   const [purging, setPurging] = useState(false);
 
   const fetchImportedProperties = async () => {
-    setLoadingProps(true);
-    try {
-      const q = query(collection(db, "properties"), where("imported", "==", true));
-      const snap = await getDocs(q);
-      const propsList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setImportedProps(propsList);
-    } catch (err) {
-      console.error("Failed to load imported properties:", err);
-    } finally {
-      setLoadingProps(false);
-    }
+    // keeping fetchImportedProperties here just in case, but probably not used if it was only for revise tab
   };
 
-  useEffect(() => {
-    if (importerMode === "revise") {
-      fetchImportedProperties();
-    }
-  }, [importerMode]);
 
-  const handleScaleProp = async (id: string, currentVal: number, currentPrevVal: number) => {
-    try {
-      const pRef = doc(db, "properties", id);
-      const newVal = currentVal * 1000;
-      const newPrevVal = currentPrevVal * 1000;
-      
-      const updateData: any = {
-        assessedValue: newVal,
-        updatedAt: serverTimestamp()
-      };
-      if (currentPrevVal > 0) {
-        updateData.previousAssessedValue = newPrevVal;
-      }
-
-      await updateDoc(pRef, updateData);
-      setImportedProps(prev => prev.map(p => p.id === id ? { ...p, assessedValue: newVal, previousAssessedValue: currentPrevVal > 0 ? newPrevVal : p.previousAssessedValue } : p));
-      await logAudit("UPDATE", "Property", id, { assessedValue: currentVal }, { assessedValue: newVal });
-    } catch (e) {
-      console.error("Failed to scale property:", e);
-    }
-  };
-
-  const handleBulkScaleSuspicious = async () => {
-    const suspicious = importedProps.filter(p => !p.isArchived && p.assessedValue < 50000);
-    if (suspicious.length === 0) return;
-    setBulkScaling(true);
-    try {
-      let scaledCount = 0;
-      for (const p of suspicious) {
-        const pRef = doc(db, "properties", p.id);
-        const newVal = p.assessedValue * 1000;
-        const currentPrev = p.previousAssessedValue || 0;
-        const updateData: any = {
-          assessedValue: newVal,
-          updatedAt: serverTimestamp()
-        };
-        if (currentPrev > 0 && currentPrev < 50000) {
-          updateData.previousAssessedValue = currentPrev * 1000;
-        }
-        await updateDoc(pRef, updateData);
-        await logAudit("UPDATE", "Property", p.id, { assessedValue: p.assessedValue }, { assessedValue: newVal });
-        scaledCount++;
-      }
-      alert(`Auto-scaled ${scaledCount} properties successfully!`);
-      await fetchImportedProperties();
-    } catch (e) {
-      console.error("Bulk scale failed:", e);
-    } finally {
-      setBulkScaling(false);
-    }
-  };
-
-  const handleSaveInlineEdit = async (id: string) => {
-    try {
-      const pRef = doc(db, "properties", id);
-      const cleanAssessed = parseCleanFloat(inlineEditAssessed);
-      const cleanPrevAssessed = parseCleanFloat(inlineEditPrevAssessed);
-      
-      await updateDoc(pRef, {
-        assessedValue: cleanAssessed,
-        previousAssessedValue: cleanPrevAssessed,
-        updatedAt: serverTimestamp()
-      });
-      
-      setImportedProps(prev => prev.map(p => p.id === id ? { ...p, assessedValue: cleanAssessed, previousAssessedValue: cleanPrevAssessed } : p));
-      setEditingPropId(null);
-      await logAudit("UPDATE", "PropertyInlineEdit", id, null, { assessedValue: cleanAssessed, previousAssessedValue: cleanPrevAssessed });
-    } catch (e) {
-      console.error("Failed to save inline edit:", e);
-    }
-  };
-
-  const handleDeleteProp = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this specific property?")) return;
-    try {
-      const pRef = doc(db, "properties", id);
-      await deleteDoc(pRef);
-      setImportedProps(prev => prev.filter(p => p.id !== id));
-      await logAudit("DELETE", "Property", id, null, null);
-    } catch (e) {
-      console.error("Failed to delete property:", e);
-    }
-  };
-
-  const handlePurgeImported = async () => {
-    if (!window.confirm("Are you absolutely sure you want to permanently delete all imported properties from the database? This action cannot be undone and will delete all imported records!")) {
-      return;
-    }
-    setPurging(true);
-    try {
-      let count = 0;
-      for (const p of importedProps) {
-        const pRef = doc(db, "properties", p.id);
-        await deleteDoc(pRef);
-        await logAudit("DELETE", "Property", p.id, p, null);
-        count++;
-      }
-      setImportedProps([]);
-      alert(`Successfully purged ${count} imported records. You can now re-upload your CSV file.`);
-    } catch (e) {
-      console.error("Failed to purge properties:", e);
-    } finally {
-      setPurging(false);
-    }
-  };
 
   const [status, setStatus] = useState<"idle" | "parsing" | "uploading" | "success" | "error">("idle");
   const [results, setResults] = useState({ success: 0, failed: 0 });
@@ -196,6 +75,42 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
     };
     errors: string[];
   }
+
+  const handleDelinquencyGeneration = async (propertyId: string, effectivityDateRaw: string, assessedValueRaw: number) => {
+    let effYear = parseInt(effectivityDateRaw);
+    if (isNaN(effYear) && effectivityDateRaw.includes("-")) {
+        effYear = new Date(effectivityDateRaw).getFullYear();
+    } else if (isNaN(effYear)) {
+        const match = effectivityDateRaw.match(/\b(19|20)\d{2}\b/);
+        if (match) effYear = parseInt(match[0]);
+    }
+    
+    if (!isNaN(effYear)) {
+        const currentYear = new Date().getFullYear();
+        for (let y = effYear; y <= currentYear; y++) {
+            const dq = query(collection(db, "delinquencies"), where("propertyId", "==", propertyId), where("year", "==", y));
+            const ds = await getDocs(dq);
+            if (ds.empty) {
+                const basicTaxDue = assessedValueRaw * 0.01; // BASIC_TAX_RATE
+                const sefTaxDue = assessedValueRaw * 0.01; // SEF_TAX_RATE
+                await addDoc(collection(db, "delinquencies"), {
+                    propertyId: propertyId,
+                    year: y,
+                    basicTaxDue: basicTaxDue,
+                    sefTaxDue: sefTaxDue,
+                    penalty: 0,
+                    interest: 0,
+                    totalDue: basicTaxDue + sefTaxDue,
+                    totalPaid: 0,
+                    status: y === currentYear ? "Pending" : "Delinquent",
+                    recordedBy: profile?.username || profile?.displayName || "System",
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                });
+            }
+        }
+    }
+  };
 
   const [skippedProperties, setSkippedProperties] = useState<SkippedProperty[]>([]);
   const [showSkippedModal, setShowSkippedModal] = useState(false);
@@ -402,8 +317,9 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                   imported: true
                 });
                 await logAudit("UPDATE", "PropertyBulkUpload", existingDoc.id, { tdNumber: tdRaw }, { assessedValue: assessedValueRaw });
+                await handleDelinquencyGeneration(existingDoc.id, effectivityDateRaw, assessedValueRaw);
               } else {
-                await addDoc(collection(db, "properties"), {
+                const newDocRef = await addDoc(collection(db, "properties"), {
                   pin: pinRaw || tdRaw,
                   ownerName: ownerNameRaw,
                   ownerAddress: row.ownerAddress || "",
@@ -432,6 +348,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                   updatedAt: serverTimestamp(),
                   imported: true
                 });
+                await handleDelinquencyGeneration(newDocRef.id, effectivityDateRaw, assessedValueRaw);
               }
               success++;
             } catch (err: any) {
@@ -545,8 +462,9 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
           imported: true
         });
         await logAudit("UPDATE", "ImportCorrection", docId, null, { ownerName: ownerNameRaw, tdNumber: tdRaw });
+        await handleDelinquencyGeneration(docId, effectivityDateRaw, assessedValueRaw);
       } else {
-        await addDoc(collection(db, "properties"), {
+        const newDocRef = await addDoc(collection(db, "properties"), {
           pin: pinRaw || tdRaw,
           ownerName: ownerNameRaw,
           ownerAddress: editFormData.ownerAddress || "",
@@ -576,6 +494,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
           imported: true
         });
         await logAudit("CREATE", "ImportCorrection", tdRaw, null, { ownerName: ownerNameRaw, tdNumber: tdRaw });
+        await handleDelinquencyGeneration(newDocRef.id, effectivityDateRaw, assessedValueRaw);
       }
 
       setResults(prev => ({
@@ -624,14 +543,14 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
   };
 
   const isReviewing = status === "success" && showSkippedModal && skippedProperties.length > 0;
-  const modalMaxWidth = (isReviewing || importerMode === "revise") ? "max-w-5xl" : "max-w-md";
+  const modalMaxWidth = isReviewing ? "max-w-5xl" : "max-w-md";
 
   return (
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
       <div className={`bg-slate-900 rounded-2xl shadow-3xl w-full ${modalMaxWidth} overflow-hidden border border-slate-800 ring-1 ring-white/5 transition-all duration-300`}>
         <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
           <h3 className="font-bold text-white flex items-center gap-2">
-            <Upload className="w-4 h-4 text-indigo-400" />
+            <Upload className="w-4 h-4 text-blue-400" />
             Data Migration (CSV)
           </h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
@@ -639,249 +558,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
           </button>
         </div>
 
-        {/* Importer mode tabs selection */}
-        <div className="px-6 py-2 border-b border-slate-800 bg-slate-950/20 flex gap-4 text-xs font-bold uppercase tracking-wider select-none shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setImporterMode("upload");
-              setStatus("idle");
-            }}
-            className={`pb-2 pt-1 border-b-2 transition-all cursor-pointer ${importerMode === "upload" ? "text-indigo-400 border-indigo-500 font-extrabold" : "text-slate-400 border-transparent hover:text-slate-200"}`}
-          >
-            Upload CSV File
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setImporterMode("revise");
-            }}
-            className={`pb-2 pt-1 border-b-2 transition-all cursor-pointer ${importerMode === "revise" ? "text-indigo-400 border-indigo-500 font-extrabold" : "text-slate-400 border-transparent hover:text-slate-200"}`}
-          >
-            Manage & Revise Imported Data
-          </button>
-        </div>
-
-        {importerMode === "revise" ? (
-          <div className="p-6 h-[550px] flex flex-col overflow-hidden bg-slate-900 space-y-4 font-sans">
-            {/* Quick action bar */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-950/40 p-4 rounded-xl border border-slate-800/60 shadow-sm shrink-0">
-              <div className="space-y-1">
-                <h4 className="text-sm font-bold text-slate-200">Import Revision & Repair Console</h4>
-                <p className="text-[11px] text-slate-500">
-                  Manage and fix all properties imported from CSV templates. You can scale values or edit records inline.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleBulkScaleSuspicious}
-                  disabled={bulkScaling || loadingProps || importedProps.filter(p => !p.isArchived && p.assessedValue < 50000).length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-605 bg-amber-600 disabled:opacity-40 text-slate-950 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-amber-500/10"
-                >
-                  {bulkScaling ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Scaling...
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      Auto-Scale Truncated x1000 ({importedProps.filter(p => !p.isArchived && p.assessedValue < 50000).length})
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePurgeImported}
-                  disabled={purging || loadingProps || importedProps.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-650 bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-red-600/10"
-                >
-                  {purging ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Purging...
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Purge All Imports ({importedProps.length})
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Search and Filters */}
-            <div className="flex gap-2 shrink-0">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  placeholder="Query owner name, TDN to find specific records..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-slate-955 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500 font-sans"
-                />
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">🔍</span>
-              </div>
-              <button
-                type="button"
-                onClick={fetchImportedProperties}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-705 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold transition border border-slate-700 font-sans"
-              >
-                Refresh
-              </button>
-            </div>
-
-            {/* Properties Records Table */}
-            <div className="flex-1 overflow-auto border border-slate-800/80 rounded-xl bg-slate-950/20">
-              {loadingProps ? (
-                <div className="flex flex-col items-center justify-center h-full py-12 space-y-3">
-                  <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-                  <p className="text-slate-400 text-xs font-medium">Fetching database records...</p>
-                </div>
-              ) : importedProps.length === 0 ? (
-                <div className="p-12 text-center text-slate-500 italic text-xs">
-                  No imported properties found in your database.
-                </div>
-              ) : (
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead className="bg-slate-950/85 bg-slate-950 sticky top-0 border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="p-3 pl-4">TD Number</th>
-                      <th className="p-3">Owner</th>
-                      <th className="p-3">Barangay</th>
-                      <th className="p-3 text-right">Assessed Value</th>
-                      <th className="p-3 text-right">Previous A.V.</th>
-                      <th className="p-3 text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40">
-                    {importedProps
-                      .filter(p => {
-                        const q = searchQuery.toLowerCase().trim();
-                        if (!q) return true;
-                        return (p.ownerName || "").toLowerCase().includes(q) || (p.tdNumber || "").toLowerCase().includes(q);
-                      })
-                      .map((p) => {
-                        const isEditing = editingPropId === p.id;
-                        const looksTruncated = !p.isArchived && p.assessedValue < 50000;
-                        const prevLooksTruncated = !p.isArchived && p.previousAssessedValue > 0 && p.previousAssessedValue < 50000;
-                        
-                        return (
-                          <tr key={p.id} className={`hover:bg-slate-800/30 transition-colors ${looksTruncated ? 'bg-amber-500/[0.02]' : ''}`}>
-                            <td className="p-3 pl-4 font-mono text-slate-300 font-bold">{p.tdNumber}</td>
-                            <td className="p-3 font-semibold text-white max-w-[150px] truncate">{p.ownerName}</td>
-                            <td className="p-3 text-slate-400">{p.barangay}</td>
-                            
-                            <td className="p-3 text-right">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={inlineEditAssessed}
-                                  onChange={(e) => setInlineEditAssessed(e.target.value)}
-                                  className="w-24 bg-slate-950 border border-slate-800 px-2 py-1 text-xs text-emerald-400 text-right rounded font-mono outline-none focus:border-indigo-500"
-                                />
-                              ) : (
-                                <div className="inline-flex flex-col items-end">
-                                  <span className="font-bold text-emerald-400 font-mono">
-                                    ₱{(p.assessedValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                  </span>
-                                  {looksTruncated && (
-                                    <span className="text-[9px] text-amber-500 font-extrabold bg-amber-500/10 border border-amber-500/20 px-1 py-0.5 mt-0.5 rounded uppercase tracking-wider scale-[0.9]">
-                                      ⚠️ Truncated?
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-
-                            <td className="p-3 text-right">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={inlineEditPrevAssessed}
-                                  onChange={(e) => setInlineEditPrevAssessed(e.target.value)}
-                                  className="w-24 bg-slate-950 border border-slate-800 px-2 py-1 text-xs text-slate-300 text-right rounded font-mono outline-none focus:border-indigo-550"
-                                />
-                              ) : (
-                                <div className="inline-flex flex-col items-end">
-                                  <span className="font-medium text-slate-400 font-mono">
-                                    ₱{(p.previousAssessedValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                  </span>
-                                  {prevLooksTruncated && (
-                                    <span className="text-[9px] text-amber-550 text-amber-500 font-semibold uppercase scale-[0.85]">
-                                      Low
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-
-                            <td className="p-3">
-                              <div className="flex justify-center items-center gap-1.5">
-                                {isEditing ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSaveInlineEdit(p.id)}
-                                      className="px-2 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded hover:bg-emerald-500/20 text-[10px] font-black uppercase transition-colors"
-                                    >
-                                      Save
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingPropId(null)}
-                                      className="px-2 py-1 bg-slate-800 text-slate-400 border border-slate-700 rounded hover:bg-slate-700 text-[10px] font-black uppercase transition-colors"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingPropId(p.id);
-                                        setInlineEditAssessed(String(p.assessedValue || "0"));
-                                        setInlineEditPrevAssessed(String(p.previousAssessedValue || "0"));
-                                      }}
-                                      className="p-1 px-1.5 bg-slate-850 hover:bg-indigo-500/10 text-slate-400 hover:text-indigo-400 border border-slate-800 rounded transition-colors text-[10px]"
-                                      title="Edit Value"
-                                    >
-                                      ✏️ Edit
-                                    </button>
-                                    {looksTruncated && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleScaleProp(p.id, p.assessedValue, p.previousAssessedValue || 0)}
-                                        className="px-2 py-1 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 border border-indigo-500/20 rounded text-[9px] font-bold uppercase tracking-wider transition-colors"
-                                        title="Multiply valuation by 1000 to scale from Ones to Thousands"
-                                      >
-                                        Scale x1000
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteProp(p.id)}
-                                      className="p-1 px-1.5 bg-slate-850 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-slate-850 rounded transition-colors text-[10px]"
-                                      title="Delete Record"
-                                    >
-                                      🗑️ Delete
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        ) : isReviewing ? (
+        {isReviewing ? (
           <div className="flex flex-col h-[650px] md:flex-row overflow-hidden divide-y md:divide-y-0 md:divide-x divide-slate-800 bg-slate-900 border-t border-slate-800">
             {/* Left Panel: Skipped items list */}
             <div className="w-full md:w-80 shrink-0 flex flex-col h-full bg-slate-950/20 overflow-hidden">
@@ -904,7 +581,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                         setEditFormData({ ...item.data });
                         setCorrectionError(null);
                       }}
-                      className={`w-full text-left p-4 transition-all hover:bg-slate-850/50 flex flex-col gap-1 cursor-pointer border-l-2 ${isActive ? 'bg-indigo-500/5 border-l-indigo-500' : 'border-l-transparent'}`}
+                      className={`w-full text-left p-4 transition-all hover:bg-slate-850/50 flex flex-col gap-1 cursor-pointer border-l-2 ${isActive ? 'bg-blue-500/5 border-l-blue-500' : 'border-l-transparent'}`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-xs text-white truncate max-w-[140px]">
@@ -938,7 +615,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
             <div className="flex-1 flex flex-col h-full bg-slate-900/40 overflow-hidden">
               <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60 shrink-0">
                 <div>
-                  <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest block">Correct & Resolve Errors</h4>
+                  <h4 className="text-xs font-black text-blue-400 uppercase tracking-widest block">Correct & Resolve Errors</h4>
                   <p className="text-[10px] text-slate-400 mt-1">Submit corrected values to direct register inside database.</p>
                 </div>
                 
@@ -977,7 +654,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.ownerName || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, ownerName: e.target.value })}
                             placeholder="Enter Owner Name"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
                           />
                         </div>
 
@@ -988,7 +665,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.ownerAddress || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, ownerAddress: e.target.value })}
                             placeholder="Street / Barangay / Municipality / Province"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
                           />
                         </div>
 
@@ -999,7 +676,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.administratorName || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, administratorName: e.target.value })}
                             placeholder="Enter Admin Name"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
                           />
                         </div>
 
@@ -1010,7 +687,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.administratorAddress || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, administratorAddress: e.target.value })}
                             placeholder="Enter Admin Address"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
                           />
                         </div>
                       </div>
@@ -1029,7 +706,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.tdNumber || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, tdNumber: e.target.value })}
                             placeholder="Format: YY-MM-BBB-NNNNN"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
                           />
                         </div>
 
@@ -1040,7 +717,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.pin || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, pin: e.target.value })}
                             placeholder="Leave as PIN or same as TDN"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
                           />
                         </div>
 
@@ -1049,7 +726,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                           <select
                             value={editFormData.classification || "LAND"}
                             onChange={(e) => setEditFormData({ ...editFormData, classification: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
                           >
                             <option value="LAND">LAND</option>
                             <option value="BUILDING">BUILDING</option>
@@ -1065,7 +742,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.area || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, area: e.target.value })}
                             placeholder="e.g. 500 sqm"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
                           />
                         </div>
                       </div>
@@ -1084,7 +761,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.assessedValue || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, assessedValue: e.target.value })}
                             placeholder="0"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
                           />
                         </div>
 
@@ -1097,7 +774,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.effectivityDate || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, effectivityDate: e.target.value })}
                             placeholder="e.g. 2026"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
                           />
                         </div>
 
@@ -1110,7 +787,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.barangay || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, barangay: e.target.value })}
                             placeholder="Entering Brgy Name"
-                            className="w-full bg-slate-955 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
+                            className="w-full bg-slate-955 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
                           />
                         </div>
 
@@ -1121,7 +798,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.detailedLocation || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, detailedLocation: e.target.value })}
                             placeholder="Zone details / landmark description"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
                           />
                         </div>
                       </div>
@@ -1138,7 +815,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.previousTdNo || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, previousTdNo: e.target.value })}
                             placeholder="Prior TD No"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
                           />
                         </div>
 
@@ -1149,7 +826,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.previousOwner || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, previousOwner: e.target.value })}
                             placeholder="Prior Owner Name"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white outline-none font-sans"
                           />
                         </div>
 
@@ -1160,7 +837,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                             value={editFormData.previousAssessedValue || ""}
                             onChange={(e) => setEditFormData({ ...editFormData, previousAssessedValue: e.target.value })}
                             placeholder="Prior Valuation (PHP)"
-                            className="w-full bg-slate-950 border border-slate-805 border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
+                            className="w-full bg-slate-950 border border-slate-805 border-slate-800 focus:border-blue-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none"
                           />
                         </div>
                       </div>
@@ -1190,7 +867,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                       if (currentItem) handleCorrectAndImport(currentItem);
                     }}
                     disabled={correctingId !== null}
-                    className="px-5 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-lg text-xs font-black uppercase tracking-wider shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2 cursor-pointer"
+                    className="px-5 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg text-xs font-black uppercase tracking-wider shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2 cursor-pointer"
                   >
                     {correctingId !== null ? (
                       <>
@@ -1220,14 +897,14 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                 <button 
                   onClick={downloadTemplate}
                   type="button"
-                  className="flex items-center gap-1.5 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 hover:text-indigo-300 rounded-lg text-xs font-bold transition border border-indigo-500/20 shrink-0 select-none shadow-sm shadow-indigo-500/5"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition border border-blue-500/20 shrink-0 select-none shadow-sm shadow-blue-500/5"
                 >
                   <Download className="w-3.5 h-3.5" />
                   Template
                 </button>
               </div>
 
-              <div className="border-2 border-dashed border-slate-800 rounded-2xl p-10 text-center hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer relative group">
+              <div className="border-2 border-dashed border-slate-800 rounded-2xl p-10 text-center hover:border-blue-500/50 hover:bg-blue-500/5 transition-all cursor-pointer relative group">
                 <input 
                   type="file" 
                   accept=".csv" 
@@ -1235,7 +912,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                   className="absolute inset-0 opacity-0 cursor-pointer z-10"
                 />
                 <div className="bg-slate-800 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
-                  <Upload className="w-8 h-8 text-indigo-400" />
+                  <Upload className="w-8 h-8 text-blue-400" />
                 </div>
                 <p className="text-sm font-semibold text-white tracking-wide">
                   {file ? file.name : "Click to select CSV file"}
@@ -1249,7 +926,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                     id="overwriteDuplicates"
                     checked={overwriteDuplicates}
                     onChange={(e) => setOverwriteDuplicates(e.target.checked)}
-                    className="w-4 h-4 rounded text-indigo-500 bg-slate-950 border-slate-800 focus:ring-0 cursor-pointer accent-indigo-500"
+                    className="w-4 h-4 rounded text-blue-500 bg-slate-950 border-slate-800 focus:ring-0 cursor-pointer accent-blue-500"
                   />
                   <div className="space-y-0.5 cursor-pointer select-none" onClick={() => setOverwriteDuplicates(!overwriteDuplicates)}>
                     <label htmlFor="overwriteDuplicates" className="text-xs font-bold text-slate-200 block cursor-pointer">
@@ -1264,7 +941,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
               <button 
                 onClick={startImport}
                 disabled={!file}
-                className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-500 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-xl shadow-indigo-600/20"
+                className="w-full py-3.5 bg-[#002060] text-white rounded-xl font-bold hover:bg-[#001540] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-xl shadow-[#002060]/20"
               >
                 Start Migration
               </button>
@@ -1274,8 +951,8 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
           {(status === "parsing" || status === "uploading") && (
             <div className="text-center py-12 space-y-4">
               <div className="relative w-20 h-20 mx-auto">
-                <div className="absolute inset-0 border-4 border-indigo-500/20 rounded-full"></div>
-                <Loader2 className="w-20 h-20 text-indigo-500 animate-spin relative z-10" />
+                <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
+                <Loader2 className="w-20 h-20 text-blue-500 animate-spin relative z-10" />
               </div>
               <p className="text-slate-300 font-medium animate-pulse">Processing records... Please wait</p>
             </div>
@@ -1342,7 +1019,7 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
                     setStatus("idle");
                     setErrorMessage(null);
                   }}
-                  className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-500 active:scale-[0.98] transition-all shadow-xl shadow-indigo-600/20"
+                  className="w-full py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-500 active:scale-[0.98] transition-all shadow-xl shadow-blue-600/20"
                 >
                   Try Again
                 </button>

@@ -68,9 +68,10 @@ export const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectProperty }) 
 
   return (
     <div ref={containerRef} className="relative w-80 md:w-96 select-none z-40">
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+      <div className="relative" style={{ paddingLeft: '-1px', paddingTop: '0px', marginLeft: '0px', marginRight: '18px' }}>
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" style={{ paddingLeft: '0px', marginLeft: '28px', paddingTop: '0px' }} />
         <input
+          style={{ paddingLeft: '44px', paddingTop: '8px', paddingBottom: '8px', marginLeft: '24px' }}
           type="text"
           value={searchTerm}
           onChange={(e) => {
@@ -79,7 +80,7 @@ export const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectProperty }) 
           }}
           onFocus={() => setIsOpen(true)}
           placeholder="Search owner name, PIN, TDN..."
-          className="w-full bg-slate-900/60 border border-slate-800/85 focus:border-indigo-500/80 rounded-2xl py-2 pl-11 pr-10 text-xs text-white placeholder:text-slate-500 transition-all outline-none focus:ring-2 focus:ring-indigo-500/10"
+          className="w-full bg-slate-900/60 border border-slate-800/85 focus:border-blue-500/80 rounded-2xl py-2 pl-11 pr-10 text-xs text-white placeholder:text-slate-500 transition-all outline-none focus:ring-2 focus:ring-blue-500/10"
         />
         {searchTerm && (
           <button 
@@ -99,7 +100,7 @@ export const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectProperty }) 
         <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900/95 border border-slate-800/90 backdrop-blur-xl rounded-2xl shadow-2xl max-h-96 overflow-y-auto overflow-x-hidden p-2 z-50">
           {loading ? (
             <div className="flex items-center justify-center p-6 gap-2 text-xs text-slate-400">
-              <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+              <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
               <span>Indexing properties...</span>
             </div>
           ) : filteredProperties.length === 0 ? (
@@ -153,20 +154,20 @@ export const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectProperty }) 
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-400 mt-1 font-mono">
-                        <span className="text-[10px] font-bold text-indigo-300">{p.tdNumber || "No TDN"}</span>
+                        <span className="text-[10px] font-bold text-blue-300">{p.tdNumber || "No TDN"}</span>
                         <span className="text-slate-600">•</span>
                         <span>PIN: {p.pin || "N/A"}</span>
                       </div>
                       <div className="text-[9px] text-slate-500 mt-0.5 flex justify-between items-center">
                         <span className="truncate text-slate-400">Brgy. {p.barangay || "---"}</span>
-                        <span className="font-bold text-indigo-400 font-mono">{formatCurrency(p.assessedValue)}</span>
+                        <span className="font-bold text-blue-400 font-mono">{formatCurrency(p.assessedValue)}</span>
                       </div>
                     </div>
                   </button>
                 );
               })}
               {filteredProperties.length > 15 && (
-                <div className="text-center py-2 text-[9px] font-bold text-indigo-400 uppercase tracking-wider border-t border-slate-800/40">
+                <div className="text-center py-2 text-[9px] font-bold text-blue-400 uppercase tracking-wider border-t border-slate-800/40">
                   Showing top 15 results. Refine search to see more.
                 </div>
               )}

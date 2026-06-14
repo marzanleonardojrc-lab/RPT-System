@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { collection, query, orderBy, limit, onSnapshot, db, handleFirestoreError, OperationType, where } from "../lib/firebase";
+import { collection, query, orderBy, limit, onSnapshot, db, handleFirestoreError, OperationType, where, getDocs, writeBatch, doc } from "../lib/firebase";
 import { AuditLog } from "../types";
 import { formatDateFull } from "../lib/utils";
-import { Clock, User, ArrowRight, Shield, Filter, Search } from "lucide-react";
+import { Clock, User, ArrowRight, Shield, Filter, Search, Download, Trash2, Loader2 } from "lucide-react";
 
 const AuditLogView: React.FC = () => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [filterType, setFilterType] = useState<"none" | "date" | "month" | "year">("none");
   const [filterValue, setFilterValue] = useState("");
   const [isTracking, setIsTracking] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (filterType === "none" || !isTracking || !filterValue) {
@@ -58,6 +59,61 @@ const AuditLogView: React.FC = () => {
     setIsTracking(false);
   };
 
+  const handleBulkDelete = async () => {
+    if (filterType === "none" || !filterValue) return;
+    
+    if (!window.confirm(`WARNING: This will permanently delete ALL audit logs for the selected ${filterType} (${filterValue}). Ensure you have exported a backup first.\n\nContinue?`)) return;
+    setIsDeleting(true);
+    try {
+      let startTarget: Date;
+      let endTarget: Date;
+      
+      if (filterType === 'date') {
+        startTarget = new Date(filterValue);
+        endTarget = new Date(filterValue);
+        endTarget.setDate(endTarget.getDate() + 1);
+      } else if (filterType === 'month') {
+        startTarget = new Date(filterValue + "-01");
+        endTarget = new Date(startTarget.getFullYear(), startTarget.getMonth() + 1, 1);
+      } else { // year
+        startTarget = new Date(filterValue + "-01-01");
+        endTarget = new Date(Number(filterValue) + 1, 0, 1);
+      }
+
+      const q = query(
+        collection(db, "audit_logs"), 
+        where("timestamp", ">=", startTarget),
+        where("timestamp", "<", endTarget)
+      );
+      
+      const snap = await getDocs(q);
+      const deletedCount = snap.docs.length;
+      
+      let batch = writeBatch(db);
+      let opCount = 0;
+      
+      for (const d of snap.docs) {
+        batch.delete(doc(db, "audit_logs", d.id));
+        opCount++;
+        if (opCount === 500) {
+           await batch.commit();
+           batch = writeBatch(db);
+           opCount = 0;
+        }
+      }
+      if (opCount > 0) {
+         await batch.commit();
+      }
+      
+      alert(`Successfully deleted ${deletedCount} audit logs for ${filterValue}.`);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to delete audit logs.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -70,19 +126,19 @@ const AuditLogView: React.FC = () => {
            <div className="flex gap-1 bg-slate-950 p-1 rounded-lg">
              <button 
                 onClick={() => handleFilterTypeChange("date")}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${filterType === "date" ? "bg-indigo-500 text-white" : "text-slate-400 hover:text-white"}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${filterType === "date" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"}`}
              >
                Date
              </button>
              <button 
                 onClick={() => handleFilterTypeChange("month")}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${filterType === "month" ? "bg-indigo-500 text-white" : "text-slate-400 hover:text-white"}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${filterType === "month" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"}`}
              >
                Month
              </button>
              <button 
                 onClick={() => handleFilterTypeChange("year")}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${filterType === "year" ? "bg-indigo-500 text-white" : "text-slate-400 hover:text-white"}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${filterType === "year" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"}`}
              >
                Year
              </button>
@@ -105,7 +161,7 @@ const AuditLogView: React.FC = () => {
                      handleTrack();
                    }
                  }}
-                 className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 min-w-[140px]"
+                 className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 min-w-[140px]"
                  style={{ colorScheme: 'dark' }}
                />
                <button 
@@ -119,6 +175,23 @@ const AuditLogView: React.FC = () => {
              </div>
            )}
         </div>
+      </div>
+
+      <div className="flex justify-end gap-2">
+         {isTracking && logs.length > 0 && (
+           <>
+             {(filterType === "month" || filterType === "year") && (
+               <button 
+                 onClick={handleBulkDelete}
+                 disabled={isDeleting}
+                 className="bg-red-600/20 text-red-400 border border-red-600/50 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-600/30 transition-all flex items-center gap-2"
+               >
+                 {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                 Bulk Delete
+               </button>
+             )}
+           </>
+         )}
       </div>
 
       <div className="space-y-3">
@@ -147,7 +220,7 @@ const AuditLogView: React.FC = () => {
             <div key={log.id} className="bg-slate-900/50 backdrop-blur-sm p-4 rounded-xl border border-slate-800 shadow-sm flex items-start gap-4 hover:border-slate-700 transition-all">
               <div className={`p-2 rounded-lg ${
                 log.action === 'CREATE' ? 'bg-emerald-500/10 text-emerald-400' :
-                log.action === 'UPDATE' ? 'bg-indigo-500/10 text-indigo-400' :
+                log.action === 'UPDATE' ? 'bg-blue-500/10 text-blue-400' :
                 log.action === 'VOID' ? 'bg-red-500/10 text-red-400' : 
                 'bg-slate-800 text-slate-400'
               }`}>
@@ -157,7 +230,7 @@ const AuditLogView: React.FC = () => {
               <div className="flex-1">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center justify-between">
                   <p className="font-bold text-white flex items-center gap-2 flex-wrap">
-                    {log.action} <span className="text-slate-500 font-normal">on</span> <span className="text-indigo-400">{log.entityType}</span>
+                    {log.action} <span className="text-slate-500 font-normal">on</span> <span className="text-blue-400">{log.entityType}</span>
                   </p>
                   <span className="text-xs text-slate-500 flex items-center gap-1 shrink-0">
                     <Clock className="w-3 h-3" />

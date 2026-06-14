@@ -20,9 +20,24 @@ import { Property } from "./types";
 
 const AppContent: React.FC = () => {
   const { user, profile, loading, logout, isAdmin, isEncoder, isOffline, isTaxpayer } = useAuth();
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTabInner, setActiveTabInner] = useState("dashboard");
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [selectedPropertyFromSearch, setSelectedPropertyFromSearch] = useState<Property | null>(null);
+  const [paymentPrefillProperty, setPaymentPrefillProperty] = useState<Property | null>(null);
+
+  const activeTab = activeTabInner;
+  const setActiveTab = (tab: string) => {
+    setActiveTabInner(tab);
+    if (tab !== "collection") {
+      setPaymentPrefillProperty(null); // Clear it if navigating away
+    }
+  };
+
+  const handlePostPayment = (prop: Property) => {
+    setSelectedPropertyFromSearch(null);
+    setPaymentPrefillProperty(prop);
+    setActiveTab("collection");
+  };
 
   React.useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
@@ -37,8 +52,8 @@ const AppContent: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950">
         <div className="flex flex-col items-center gap-6 relative">
-          <div className="absolute -inset-4 bg-indigo-500/10 blur-2xl rounded-full"></div>
-          <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin relative z-10" />
+          <div className="absolute -inset-4 bg-blue-500/10 blur-2xl rounded-full"></div>
+          <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin relative z-10" />
           <div className="flex flex-col items-center gap-1 z-10">
             <p className="text-white font-bold tracking-widest text-xs uppercase animate-pulse">Initializing System</p>
             <p className="text-slate-500 text-[10px] font-mono">SECURE_ROOT_INIT_COMPLETE</p>
@@ -56,7 +71,7 @@ const AppContent: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950">
         <div className="flex flex-col items-center gap-6">
-          <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+          <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
           <p className="text-slate-500 text-[10px] font-mono uppercase tracking-widest">Hydrating User Profile...</p>
         </div>
       </div>
@@ -75,16 +90,16 @@ const AppContent: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 p-8">
         <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 text-center relative overflow-hidden shadow-2xl">
-          <div className="absolute -top-24 -left-24 w-48 h-48 bg-indigo-500/10 blur-[80px] rounded-full" />
-          <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-indigo-500/10 blur-[80px] rounded-full" />
+          <div className="absolute -top-24 -left-24 w-48 h-48 bg-blue-500/10 blur-[80px] rounded-full" />
+          <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-blue-500/10 blur-[80px] rounded-full" />
           
           <div className="relative z-10 flex flex-col items-center">
-            <div className="w-20 h-20 bg-indigo-500/10 border border-indigo-500/20 rounded-3xl flex items-center justify-center mb-8 shadow-inner shadow-indigo-500/5">
-              <AlertCircle className="w-10 h-10 text-indigo-400" />
+            <div className="w-20 h-20 bg-blue-500/10 border border-blue-500/20 rounded-3xl flex items-center justify-center mb-8 shadow-inner shadow-blue-500/5">
+              <AlertCircle className="w-10 h-10 text-blue-400" />
             </div>
             
             <h1 className="text-3xl font-black text-white mb-4 tracking-tight leading-tight">
-              Access <span className="text-indigo-400">Request</span> Pending
+              Access <span className="text-blue-400">Request</span> Pending
             </h1>
             
             <p className="text-slate-400 text-sm leading-relaxed mb-8">
@@ -93,7 +108,7 @@ const AppContent: React.FC = () => {
 
             <div className="w-full p-6 bg-slate-950/50 rounded-2xl border border-slate-800/50 mb-8 space-y-4">
               <div className="flex items-center gap-3 text-left">
-                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">Current Node: Pending_Approvals</span>
               </div>
               <div className="h-px bg-slate-800/50" />
@@ -157,10 +172,10 @@ const AppContent: React.FC = () => {
 
     switch (activeTab) {
       case "dashboard": return <Dashboard />;
-      case "properties": return <PropertyRegistry key="properties-active" isEncoder={isEncoder} isAdmin={isAdmin} initialTab="Active" showTabsSelector={false} />;
-      case "archive": return <PropertyRegistry key="properties-archive" isEncoder={isEncoder} isAdmin={isAdmin} initialTab="Archived" showTabsSelector={false} />;
-      case "collection": return <CollectionModule />;
-      case "delinquencies": return <DelinquencyList isEncoder={isEncoder} isAdmin={isAdmin} />;
+      case "properties": return <PropertyRegistry key="properties-active" isEncoder={isEncoder} isAdmin={isAdmin} initialTab="Active" showTabsSelector={false} onPostPayment={handlePostPayment} />;
+      case "archive": return <PropertyRegistry key="properties-archive" isEncoder={isEncoder} isAdmin={isAdmin} initialTab="Archived" showTabsSelector={false} onPostPayment={handlePostPayment} />;
+      case "collection": return <CollectionModule prefillProperty={paymentPrefillProperty} />;
+      case "delinquencies": return <DelinquencyList isEncoder={isEncoder} isAdmin={isAdmin} onPostPayment={handlePostPayment} />;
       case "reconciliation": return <ReconciliationModule />;
       case "reports": return <COAReports />;
       case "audit": return isAdmin ? <AuditLogView /> : denied;
@@ -170,7 +185,7 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-blue-500/30">
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -178,7 +193,7 @@ const AppContent: React.FC = () => {
         isAdmin={isAdmin}
       />
       <main className="pl-64 min-h-screen bg-[radial-gradient(circle_at_top_right,_#1e293b,_transparent_40%)]">
-        <header className="h-16 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 sticky top-0 z-10">
+        <header className="h-16 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 sticky top-0 z-40">
           <div className="flex items-center gap-4">
             {isAdmin && (
               <GlobalSearch onSelectProperty={(p) => setSelectedPropertyFromSearch(p)} />
@@ -191,9 +206,9 @@ const AppContent: React.FC = () => {
             >
               <div className="text-right">
                 <p className="text-sm font-bold text-white leading-tight">{profile?.displayName}</p>
-                <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">{profile?.role}</p>
+                <p className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">{profile?.role}</p>
               </div>
-              <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-indigo-400 font-bold shadow-inner group-hover:bg-indigo-500/10 group-hover:text-indigo-300">
+              <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-blue-400 font-bold shadow-inner group-hover:bg-blue-500/10 group-hover:text-blue-300">
                 {profile?.displayName?.charAt(0)}
               </div>
             </div>
@@ -213,6 +228,7 @@ const AppContent: React.FC = () => {
         <PropertyDetails 
           property={selectedPropertyFromSearch} 
           onClose={() => setSelectedPropertyFromSearch(null)} 
+          onPostPayment={handlePostPayment}
         />
       )}
     </div>

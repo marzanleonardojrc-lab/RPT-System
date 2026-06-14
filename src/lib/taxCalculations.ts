@@ -50,7 +50,9 @@ export function calculateTotalDue(
   let multiplier = 1.0;
   let balanceAmount = 0;
 
-  if (paymentMode === "Installment" && selectedQuarters.length > 0) {
+  const isActualInstallment = paymentMode === "Installment" && selectedQuarters.length > 0 && selectedQuarters.length < 4;
+
+  if (isActualInstallment) {
     const qLevels = [
       { name: "1st Qtr", factor: 0.25, deadline: new Date(year, 2, 31) }, // March 31
       { name: "2nd Qtr", factor: 0.25, deadline: new Date(year, 5, 30) }, // June 30
@@ -109,8 +111,8 @@ export function calculateTotalDue(
   const totalDue = combinedBase + interest - discount;
   
   return {
-    basicTaxDue: paymentMode === "Installment" ? (basicTaxDue * multiplier) : basicTaxDue,
-    sefTaxDue: paymentMode === "Installment" ? (sefTaxDue * multiplier) : sefTaxDue,
+    basicTaxDue: isActualInstallment ? (basicTaxDue * multiplier) : basicTaxDue,
+    sefTaxDue: isActualInstallment ? (sefTaxDue * multiplier) : sefTaxDue,
     idleSurcharge,
     interest,
     discount,
@@ -162,8 +164,9 @@ export function groupDelinquenciesByPenaltyRule(
 
   sorted.forEach(d => {
     const isPaid = d.status === 'Paid';
+    const isActualInstallment = paymentMode === "Installment" && selectedQuarters.length > 0 && selectedQuarters.length < 4;
 
-    if (paymentMode === "Installment" && selectedQuarters.length > 0 && d.year === currentDate.getFullYear()) {
+    if (isActualInstallment && d.year === currentDate.getFullYear()) {
       // In Installment mode for current year, split into actual rows for each selected quarter
       selectedQuarters.forEach(q => {
         const calc = calculateTotalDue(d.basicTaxDue, d.sefTaxDue, d.year, currentDate, 0, "Installment", [q], isAdvance);
@@ -197,7 +200,7 @@ export function groupDelinquenciesByPenaltyRule(
     const itemDiscount = isPaid ? (d.discountPaid || calc.discount) : calc.discount;
 
     const isRecent = recentYears.includes(d.year);
-    const canGroup = calc.isCapped && !isRecent && paymentMode === "Full"; // Only group in Full mode
+    const canGroup = calc.isCapped && !isRecent && (paymentMode === "Full" || !isActualInstallment); // Only group if full or 4 quarters
 
     if (!canGroup) {
       if (currentGroup) {

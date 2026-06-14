@@ -119,7 +119,7 @@ const Dashboard: React.FC = () => {
 
   const statCards = [
     { label: "Accounts Delinquent", value: stats.totalDelinquent, icon: AlertCircle, color: "text-red-400", bg: "bg-red-500/5", border: "border-red-500/20" },
-    { label: "Total Receivables", value: formatCurrency(stats.totalAmountDue), icon: TrendingUp, color: "text-indigo-400", bg: "bg-indigo-500/5", border: "border-indigo-500/20" },
+    { label: "Total Receivables", value: formatCurrency(stats.totalAmountDue), icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-500/5", border: "border-blue-500/20" },
     { label: "Registered Properties", value: stats.propertyCount, icon: Users, color: "text-blue-400", bg: "bg-blue-500/5", border: "border-blue-500/20" },
     { label: "Paid This Year", value: stats.totalPaid, icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/5", border: "border-emerald-500/20" },
   ];
@@ -136,7 +136,7 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="text-right">
           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Status Code</p>
-          <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded text-[10px] font-mono text-indigo-400">
+          <div className="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-[10px] font-mono text-blue-400">
             HEALTH_OPTIMAL_V2
           </div>
         </div>
@@ -172,7 +172,7 @@ const Dashboard: React.FC = () => {
                 className={cn(
                   "px-4 py-1.5 text-[9px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer",
                   activeChartTab === "collections"
-                    ? "bg-indigo-600 text-white shadow-lg"
+                    ? "bg-blue-600 text-white shadow-lg"
                     : "text-slate-400 hover:text-slate-200"
                 )}
               >
@@ -184,7 +184,7 @@ const Dashboard: React.FC = () => {
                 className={cn(
                   "px-4 py-1.5 text-[9px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer",
                   activeChartTab === "delinquencies"
-                    ? "bg-indigo-600 text-white shadow-lg"
+                    ? "bg-blue-600 text-white shadow-lg"
                     : "text-slate-400 hover:text-slate-200"
                 )}
               >
@@ -206,7 +206,7 @@ const Dashboard: React.FC = () => {
                 className="p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl relative overflow-hidden flex flex-col justify-between h-full"
               >
                 <div className="absolute top-0 right-0 p-8 opacity-5">
-                   <TrendingUp className="w-32 h-32 text-indigo-500" />
+                   <TrendingUp className="w-32 h-32 text-blue-500" />
                 </div>
                 <div className="mb-8 flex items-center justify-between">
                   <div>
@@ -214,7 +214,7 @@ const Dashboard: React.FC = () => {
                     <p className="text-slate-500 text-sm">Historical delinquency accumulation by taxable year.</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-indigo-500"></span>
+                    <span className="w-3 h-3 rounded-full bg-blue-500"></span>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Growth Metric</span>
                   </div>
                 </div>

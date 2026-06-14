@@ -145,7 +145,7 @@ export default function AdminAuthDialog({ isOpen, onClose, onConfirm }: AdminAut
               className="w-full px-4 py-3 bg-slate-950 border border-slate-800 text-slate-300 rounded-xl font-bold hover:bg-slate-900 transition disabled:opacity-50 flex items-center justify-center gap-2"
               disabled={loading}
             >
-              <Mail className="w-4 h-4 text-indigo-400" />
+              <Mail className="w-4 h-4 text-blue-400" />
               Verify with Google Account
             </button>
             <button

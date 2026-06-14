@@ -194,7 +194,7 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
           <div className="p-6 border-b border-slate-800 bg-slate-900/50">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-4">
-                <div className="px-3 py-1 bg-slate-800 rounded-lg border border-slate-700 text-[10px] font-mono text-indigo-400 font-bold">
+                <div className="px-3 py-1 bg-slate-800 rounded-lg border border-slate-700 text-[10px] font-mono text-blue-400 font-bold">
                   TD: {property.tdNumber}
                 </div>
                 {(() => {
@@ -243,7 +243,7 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
           <div className="flex items-center justify-between p-4 px-6 border-b border-slate-800 bg-slate-900/50">
             <div className="flex items-center gap-3">
                <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
-                  {activeTab === "audit" ? <History className="w-4 h-4 text-indigo-400" /> : <Trash2 className="w-4 h-4 text-red-400" />}
+                  {activeTab === "audit" ? <History className="w-4 h-4 text-blue-400" /> : <Trash2 className="w-4 h-4 text-red-400" />}
                </div>
                <div>
                   <h3 className="text-sm font-bold text-white uppercase tracking-widest">{activeTab === 'audit' ? 'Audit Trail' : 'Void Record'}</h3>
@@ -289,7 +289,7 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
             <div className="space-y-4">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                  <History className="w-4 h-4 text-indigo-400" />
+                  <History className="w-4 h-4 text-blue-400" />
                   Chain of Custody & Audit Logs
                 </h4>
                 <div className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full text-[9px] font-bold text-slate-500">
@@ -314,7 +314,7 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
                           <div className={cn(
                             "w-8 h-8 rounded-xl flex items-center justify-center border",
                             log.action === "CREATE" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                            log.action === "UPDATE" ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                            log.action === "UPDATE" ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
                             "bg-amber-500/10 text-amber-400 border-amber-500/20"
                           )}>
                             {log.action === "CREATE" ? <Plus className="w-4 h-4" /> : 
@@ -411,7 +411,7 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
                           placeholder="Full name of second officer"
                           className={cn(
                             "w-full px-4 py-3 bg-slate-900 border rounded-xl text-sm text-white transition-all outline-none",
-                            (profile?.username || profile?.displayName || "System") === approvingOfficer && approvingOfficer ? "border-red-500 focus:ring-red-500" : "border-slate-800 focus:ring-indigo-500"
+                            (profile?.username || profile?.displayName || "System") === approvingOfficer && approvingOfficer ? "border-red-500 focus:ring-red-500" : "border-slate-800 focus:ring-blue-500"
                           )}
                           value={approvingOfficer}
                           onChange={(e) => setApprovingOfficer(e.target.value)}

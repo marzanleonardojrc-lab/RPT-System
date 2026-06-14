@@ -42,7 +42,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       case "danger": return <AlertCircle className="w-8 h-8 text-red-500" />;
       case "warning": return <AlertCircle className="w-8 h-8 text-amber-500" />;
       case "success": return <CheckCircle2 className="w-8 h-8 text-emerald-500" />;
-      default: return <Info className="w-8 h-8 text-indigo-500" />;
+      default: return <Info className="w-8 h-8 text-blue-500" />;
     }
   };
 
@@ -51,7 +51,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       case "danger": return "bg-red-600 hover:bg-red-500 shadow-red-600/20";
       case "warning": return "bg-amber-600 hover:bg-amber-500 shadow-amber-600/20";
       case "success": return "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20";
-      default: return "bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/20";
+      default: return "bg-blue-600 hover:bg-blue-500 shadow-blue-600/20";
     }
   };
 

@@ -24,6 +24,40 @@
   }
 }
 
+@layer components {
+  /* Action button standardization */
+  :root {
+    --action-primary-color: #60a5fa; /* Pastel blue tailwind blue-400 */
+    --action-primary-border: rgba(96, 165, 250, 0.3);
+    --action-primary-hover: rgba(96, 165, 250, 0.2);
+  }
+
+  html.light {
+    --action-primary-color: #002060;
+    --action-primary-border: rgba(0, 32, 96, 0.3);
+    --action-primary-hover: rgba(0, 32, 96, 0.1);
+  }
+
+  .btn-action-primary {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-transparent transition-all cursor-pointer;
+    border: 1px solid var(--action-primary-border);
+    color: var(--action-primary-color);
+  }
+  .btn-action-primary:hover, .btn-action-primary:focus {
+    background-color: var(--action-primary-hover);
+  }
+
+  .btn-action-destructive {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest border border-red-500/30 text-red-500 bg-red-500/10 hover:bg-red-500/20 transition-all cursor-pointer;
+  }
+  .btn-action-positive {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest border border-emerald-500/30 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 transition-all cursor-pointer;
+  }
+  .table-actions {
+    @apply flex items-center justify-end gap-2 flex-nowrap;
+  }
+}
+
 /* Custom scrollbars for dark theme */
 ::-webkit-scrollbar {
   width: 8px;
@@ -93,7 +127,7 @@ html.light aside button:hover {
   color: #0f172a !important;
 }
 
-html.light aside button.bg-indigo-500\/10 {
+html.light aside button.bg-blue-500\/10 {
   background-color: #e0e7ff !important;
   color: #4f46e5 !important;
   border-color: #c7d2fe !important;
@@ -105,7 +139,7 @@ html.light .text-slate-100,
 html.light .text-slate-200,
 html.light .text-slate-300,
 html.light .text-slate-400,
-html.light .text-slate-500:not(.text-indigo-400):not(.text-emerald-400):not(.text-red-400),
+html.light .text-slate-500:not(.text-blue-400):not(.text-emerald-400):not(.text-red-400),
 html.light .text-slate-600,
 html.light p.font-bold,
 html.light h1,
@@ -163,9 +197,9 @@ html.light textarea::placeholder {
 }
 
 /* Accent Colors */
-html.light .text-indigo-400,
-html.light .text-indigo-500,
-html.light .text-indigo-600 {
+html.light .text-blue-400,
+html.light .text-blue-500,
+html.light .text-blue-600 {
   color: #4f46e5 !important;
 }
 
@@ -185,7 +219,7 @@ html.light .text-amber-500 {
 }
 
 /* Colored Badge/Pill Backgrounds */
-html.light .bg-indigo-500\/10 {
+html.light .bg-blue-500\/10 {
   background-color: #e0e7ff !important;
   border-color: #c7d2fe !important;
 }

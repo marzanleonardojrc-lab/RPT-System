@@ -643,33 +643,31 @@ async function startServer() {
   });
 
   // --- Payment Voiding Route ---
-  app.post("/api/payments/invalidate", authenticateToken, async (req: any, res) => {
+  app.post("/api/payments/invalidate", async (req: any, res) => {
     const { adminEmail, adminPassword, orNumber, reason } = req.body;
     try {
       if (!adminEmail || !adminPassword || !orNumber || !reason) {
         return res.status(400).json({ error: "Missing required fields for voiding." });
       }
 
-      // 1. Verify admin credentials independently via Auth REST API sign-in
-      let idToken = "";
-      try {
-        idToken = await signInWithPassword(adminEmail, adminPassword);
-      } catch (authErr) {
+      // 1. Verify admin credentials
+      const adminQuery = await db.collection("users").where("email", "==", adminEmail).limit(1).get();
+      
+      if (adminQuery.empty) {
         return res.status(401).json({ error: "Unauthorized: Invalid Admin Credentials." });
       }
 
-      const activeDb = db.withToken(idToken);
+      const adminUser = adminQuery.docs[0].data();
+      
+      if (!bcrypt.compareSync(adminPassword, adminUser.password || "")) {
+        return res.status(401).json({ error: "Unauthorized: Invalid Admin Credentials." });
+      }
 
-      // Verify that the signed-in user actually has Admin role in Firestore
-      const adminQuery = await activeDb.collection("users")
-        .where("email", "==", adminEmail)
-        .where("role", "==", "Admin")
-        .limit(1)
-        .get();
-
-      if (adminQuery.empty) {
+      if (adminUser.role !== "Admin") {
         return res.status(401).json({ error: "Unauthorized: Invalid Admin Privileges." });
       }
+
+      const activeDb = db;
 
       // 2. Fetch payments under this O.R. Number
       const paymentsQuery = await activeDb.collection("payments")

@@ -56,7 +56,7 @@ export interface Property {
   createdAt: string;
 }
 
-export type DelinquencyStatus = "Pending" | "Delinquent" | "Paid" | "Voided";
+export type DelinquencyStatus = "Pending" | "Delinquent" | "Paid" | "Voided" | "NOTICE_ISSUED";
 
 export type PaymentDetails = Omit<Payment, 'id' | 'delinquencyId' | 'propertyId' | 'status' | 'voidMetadata'>;
 
@@ -92,6 +92,7 @@ export interface Delinquency {
   id: string;
   propertyId: string;
   year: number;
+  assessedValue?: number; // Assessed value applied to this specific year
   basicTaxDue: number;
   sefTaxDue: number;
   penalty: number; // Current calculated penalty
@@ -99,6 +100,7 @@ export interface Delinquency {
   totalDue: number;
   status: DelinquencyStatus;
   totalPaid: number;
+  noticeIssuedAt?: string;
   paymentDetails?: PaymentDetails; // Kept for legacy/last payment info
   payments?: Payment[]; // Optional populated payments
   pendingUpdate?: {

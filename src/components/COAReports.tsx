@@ -14,6 +14,7 @@ import { formatCurrency } from "../lib/utils";
 import { Printer, FileSpreadsheet, Settings2 } from "lucide-react";
 import { logAudit } from "../lib/audit";
 import ConfirmDialog from "./ConfirmDialog";
+import { COAReportPrintView } from "./COAReportPrintView";
 
 type ReportType = "delinquency" | "collection" | "masterlist";
 
@@ -112,7 +113,7 @@ const COAReports: React.FC = () => {
       const hasPayment = data.payments.some(p => p.propertyId === d.propertyId && p.taxYear === d.year && p.status === "Active");
       const isPaid = d.status === "Paid" || hasPayment;
 
-      if (reportType === "delinquency") return !isPaid;
+      if (reportType === "delinquency") return !isPaid && d.year !== new Date().getFullYear();
       if (reportType === "collection") return isPaid;
       return true;
     });
@@ -142,12 +143,36 @@ const COAReports: React.FC = () => {
         let rows: any[][] = [];
 
         if (reportType === "delinquency") {
-          headers = ["Tax Declaration Number", "Owner Name", "Barangay", "Tax Year", "Basic Due", "SEF Due", "Interest", "Total Due"];
+          headers = ["No.", "Declared Owners", "Tax Declaration Number", "Location of Property", "Kind of Property", "Assessed Value", "Year/s of Delinquency", "Tax Due"];
           const valid = filteredData.delinq.filter(d => filteredData.props.some(p => p.id === d.propertyId));
-          rows = valid.map(d => {
-            const p = filteredData.props.find(prop => prop.id === d.propertyId);
-            const calc = calculateTotalDue(d.basicTaxDue, d.sefTaxDue, d.year);
-            return [p?.pin, p?.ownerName, p?.barangay, d.year, d.basicTaxDue, d.sefTaxDue, calc.interest, calc.totalDue];
+          const propertiesMap = new Map<string, { prop: Property; years: number[] }>();
+          valid.forEach(d => {
+            if (!propertiesMap.has(d.propertyId)) {
+              propertiesMap.set(d.propertyId, {
+                prop: filteredData.props.find(p => p.id === d.propertyId)!,
+                years: []
+              });
+            }
+            if (!propertiesMap.get(d.propertyId)!.years.includes(d.year)) {
+               propertiesMap.get(d.propertyId)!.years.push(d.year);
+            }
+          });
+          rows = Array.from(propertiesMap.values()).map((item, idx) => {
+            const yearsOrig = [...item.years].sort((a,b) => a - b);
+            const minYear = yearsOrig[0];
+            const maxYear = yearsOrig[yearsOrig.length - 1];
+            const span = minYear === maxYear ? minYear.toString() : `${minYear}-${maxYear}`;
+            const taxDue = (item.prop.assessedValue * 0.01) * yearsOrig.length;
+            return [
+              idx + 1,
+              item.prop.ownerName,
+              item.prop.tdNumber || "",
+              item.prop.barangay,
+              item.prop.classification,
+              item.prop.assessedValue,
+              span,
+              taxDue.toFixed(2)
+            ];
           });
         } else if (reportType === "collection") {
           headers = ["OR Number", "Payment Date", "Taxpayer/Owner", "PIN", "Tax Year", "Amount Paid", "Payment Type"];
@@ -180,12 +205,24 @@ const COAReports: React.FC = () => {
     });
   };
 
+  const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
+
   const handlePrint = () => {
-    window.print();
+    setIsPrintPreviewOpen(true);
   };
 
   return (
     <div className="space-y-8 print:space-y-0">
+      {isPrintPreviewOpen && (
+        <COAReportPrintView
+          filteredData={filteredData}
+          reportType={reportType}
+          filterBarangay={filterBarangay}
+          filterYear={filterYear}
+          reportTitle={reportTitle}
+          onClose={() => setIsPrintPreviewOpen(false)}
+        />
+      )}
       <ConfirmDialog 
         isOpen={confirmDialog.isOpen}
         onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
@@ -210,15 +247,15 @@ const COAReports: React.FC = () => {
           </button>
           <button 
             onClick={handlePrint}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition text-sm font-bold shadow-lg shadow-indigo-600/20"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition text-sm font-bold shadow-lg shadow-blue-600/20"
           >
             <Printer className="w-4 h-4" />
-            Print PDF
+            Print Report
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6 bg-slate-900 border border-slate-800 rounded-2xl no-print z-10 relative">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6 bg-slate-900 border border-slate-800 rounded-2xl no-print">
         <div className="flex flex-col gap-2">
           <label className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
             <Settings2 className="w-3 h-3" /> Report Type
@@ -226,7 +263,7 @@ const COAReports: React.FC = () => {
           <select 
             value={reportType} 
             onChange={(e) => setReportType(e.target.value as ReportType)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-indigo-500"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-blue-500"
           >
             <option value="delinquency">Delinquency Report</option>
             <option value="collection">Collections & Payments Report</option>
@@ -239,7 +276,7 @@ const COAReports: React.FC = () => {
           <select 
             value={filterBarangay} 
             onChange={(e) => setFilterBarangay(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-indigo-500"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-blue-500"
           >
             <option value="All">All Barangays</option>
             {uniqueBarangays.map(b => (
@@ -254,7 +291,7 @@ const COAReports: React.FC = () => {
             <select 
               value={filterYear} 
               onChange={(e) => setFilterYear(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-blue-500"
             >
               <option value="All">All Years</option>
               {uniqueYears.map(y => (
@@ -266,71 +303,117 @@ const COAReports: React.FC = () => {
       </div>
 
       <div className="bg-slate-900/50 backdrop-blur-sm p-8 rounded-2xl border border-slate-800 shadow-xl print:bg-white print:text-black print:shadow-none print:border-none print:p-0">
-        <div className="text-center mb-10">
-          <h1 className="text-xl font-bold uppercase underline text-white print:text-black">{reportTitle}</h1>
-          <p className="text-sm text-slate-400 mt-1 print:text-gray-600">
-            As of {new Date().toLocaleDateString()}
-            {filterBarangay !== "All" ? ` • Barangay: ${filterBarangay}` : ""}
-            {filterYear !== "All" && reportType !== "masterlist" ? ` • Year: ${filterYear}` : ""}
-          </p>
-        </div>
+        {reportType !== "delinquency" && (
+          <div className="text-center mb-10">
+            <h1 className="text-xl font-bold uppercase underline text-white print:text-black">{reportTitle}</h1>
+            <p className="text-sm text-slate-400 mt-1 print:text-gray-600">
+              As of {new Date().toLocaleDateString()}
+              {filterBarangay !== "All" ? ` • Barangay: ${filterBarangay}` : ""}
+              {filterYear !== "All" && reportType !== "masterlist" ? ` • Year: ${filterYear}` : ""}
+            </p>
+          </div>
+        )}
 
         {reportType === "delinquency" && (
-          <table className="w-full text-xs border-collapse border border-slate-700 print:border-black">
-            <thead>
-              <tr className="bg-slate-800/50 print:bg-gray-100">
-                <th className="border border-slate-700 print:border-black p-2 text-center text-slate-300 print:text-black">PIN</th>
-                <th className="border border-slate-700 print:border-black p-2 text-slate-300 print:text-black">Taxpayer/Owner</th>
-                <th className="border border-slate-700 print:border-black p-2 text-center text-slate-300 print:text-black">Year</th>
-                <th className="border border-slate-700 print:border-black p-2 text-center text-slate-300 print:text-black">Brgy</th>
-                <th className="border border-slate-700 print:border-black p-2 text-right text-slate-300 print:text-black">Basic Tax</th>
-                <th className="border border-slate-700 print:border-black p-2 text-right text-slate-300 print:text-black">SEF</th>
-                <th className="border border-slate-700 print:border-black p-2 text-right text-slate-300 print:text-black">Penalties</th>
-                <th className="border border-slate-700 print:border-black p-2 text-right text-slate-300 print:text-black">TOTAL DUE</th>
-              </tr>
-            </thead>
-            <tbody className="text-slate-400 print:text-black">
+          <div className="text-white print:text-black font-sans">
+            <div className="text-center mb-8">
+              <p className="text-sm m-0 leading-tight">Republic of the Philippines</p>
+              <p className="text-sm m-0 leading-tight">Province of Aurora</p>
+              <p className="text-sm m-0 leading-tight">Municipality of Dipaculao</p>
+              <p className="text-base font-bold m-0 mt-2 leading-tight">OFFICE OF THE MUNICIPAL TREASURER</p>
+              <p className="text-lg font-bold m-0 mt-6 leading-tight underline uppercase">Notice of Delinquency in the Payment of Real Property Tax</p>
+              <p className="text-base m-0 mt-2 leading-tight">CY {new Date().getFullYear()}</p>
+              <p className="text-base font-bold m-0 mt-2 leading-tight underline uppercase">BRGY. {filterBarangay === "All" ? "ALL BARANGAYS" : filterBarangay}</p>
+            </div>
+            
+            <p className="italic text-sm mb-4 text-left">
+              Based on the records of this office, the real property tax of the following properties have not been paid:
+            </p>
+
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-[#002060] text-white font-bold print:bg-[#002060]">
+                  <th className="border border-slate-700 print:border-[#002060] p-2 text-center align-middle">No.</th>
+                  <th className="border border-slate-700 print:border-[#002060] p-2 text-center align-middle">Declared Owners</th>
+                  <th className="border border-slate-700 print:border-[#002060] p-2 text-center align-middle">Tax Declaration Number</th>
+                  <th className="border border-slate-700 print:border-[#002060] p-2 text-center align-middle">Location of Property</th>
+                  <th className="border border-slate-700 print:border-[#002060] p-2 text-center align-middle">Kind of Property</th>
+                  <th className="border border-slate-700 print:border-[#002060] p-2 text-center align-middle">Assessed Value</th>
+                  <th className="border border-slate-700 print:border-[#002060] p-2 text-center align-middle">Year/s of Delinquency</th>
+                  <th className="border border-slate-700 print:border-[#002060] p-2 text-center align-middle">Tax Due</th>
+                </tr>
+              </thead>
               {(() => {
-                const groupedMap = new Map<string, GroupedDelinquency[]>();
                 const validDelinqs = filteredData.delinq.filter(d => filteredData.props.some(p => p.id === d.propertyId));
+                const propertiesMap = new Map<string, { prop: Property; years: number[] }>();
                 
                 validDelinqs.forEach(d => {
-                  if (!groupedMap.has(d.propertyId)) {
-                    const prop = filteredData.props.find(p => p.id === d.propertyId)!;
-                    const propDelinqs = validDelinqs.filter(x => x.propertyId === d.propertyId);
-                    groupedMap.set(d.propertyId, groupDelinquenciesByPenaltyRule(propDelinqs, prop.assessedValue));
+                  if (!propertiesMap.has(d.propertyId)) {
+                    propertiesMap.set(d.propertyId, {
+                      prop: filteredData.props.find(p => p.id === d.propertyId)!,
+                      years: []
+                    });
+                  }
+                  if (!propertiesMap.get(d.propertyId)!.years.includes(d.year)) {
+                     propertiesMap.get(d.propertyId)!.years.push(d.year);
                   }
                 });
 
-                const allDisplayRows: { prop: Property; row: GroupedDelinquency }[] = [];
-                Array.from(groupedMap.entries()).forEach(([propId, rows]) => {
-                  const prop = filteredData.props.find(p => p.id === propId)!;
-                  rows.forEach(row => allDisplayRows.push({ prop, row }));
+                const rows = Array.from(propertiesMap.values()).map((item, idx) => {
+                  const yearsOrig = [...item.years].sort((a,b) => a - b);
+                  const minYear = yearsOrig[0];
+                  const maxYear = yearsOrig[yearsOrig.length - 1];
+                  const span = minYear === maxYear ? minYear.toString() : `${minYear}-${maxYear}`;
+                  const taxDue = (item.prop.assessedValue * 0.01) * yearsOrig.length;
+                  
+                  return {
+                    idx: idx + 1,
+                    ownerName: item.prop.ownerName,
+                    tdNumber: item.prop.tdNumber || "",
+                    barangay: item.prop.barangay,
+                    classification: item.prop.classification,
+                    assessedValue: item.prop.assessedValue,
+                    span: span,
+                    taxDue: taxDue
+                  };
                 });
+                
+                const totalAssessedValue = rows.reduce((acc, row) => acc + row.assessedValue, 0);
+                const totalTaxDue = rows.reduce((acc, row) => acc + row.taxDue, 0);
 
-                return allDisplayRows.map(({ prop, row }, idx) => (
-                  <tr key={`${prop.id}-${row.ids.join(',')}-${row.quarterLabel || 'full'}`} className="hover:bg-slate-800/30 print:hover:bg-transparent transition-colors">
-                    <td className="border border-slate-700 print:border-black p-2 text-center font-mono">{prop.pin}</td>
-                    <td className="border border-slate-700 print:border-black p-2 uppercase">{prop.ownerName}</td>
-                    <td className="border border-slate-700 print:border-black p-2 text-center font-bold">{row.yearDisplay}</td>
-                    <td className="border border-slate-700 print:border-black p-2 text-center">{prop.barangay}</td>
-                    <td className="border border-slate-700 print:border-black p-2 text-right">{formatCurrency(row.totalBasic).replace('₱', '')}</td>
-                    <td className="border border-slate-700 print:border-black p-2 text-right">{formatCurrency(row.totalSef).replace('₱', '')}</td>
-                    <td className="border border-slate-700 print:border-black p-2 text-right font-bold text-red-400 print:text-black">{formatCurrency(row.totalInterest).replace('₱', '')}</td>
-                    <td className="border border-slate-700 print:border-black p-2 text-right font-bold text-indigo-400 print:text-black">{formatCurrency(row.totalDue).replace('₱', '')}</td>
-                  </tr>
-                ));
+                return (
+                  <>
+                    <tbody className="text-slate-300 print:text-black">
+                      {rows.map(row => (
+                        <tr key={`${row.tdNumber}-${row.idx}`} className="hover:bg-slate-800/30 print:hover:bg-transparent transition-colors even:bg-slate-900/30 print:even:bg-gray-50 border-b border-slate-700 print:border-gray-300">
+                          <td className="p-2 text-center border-r border-slate-700 print:border-gray-300">{row.idx}</td>
+                          <td className="p-2 border-r border-slate-700 print:border-gray-300 uppercase">{row.ownerName}</td>
+                          <td className="p-2 text-center font-mono border-r border-slate-700 print:border-gray-300">{row.tdNumber}</td>
+                          <td className="p-2 text-center border-r border-slate-700 print:border-gray-300">{row.barangay}</td>
+                          <td className="p-2 text-center border-r border-slate-700 print:border-gray-300">{row.classification}</td>
+                          <td className="p-2 text-right border-r border-slate-700 print:border-gray-300">{row.assessedValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="p-2 text-center font-bold border-r border-slate-700 print:border-gray-300">{row.span}</td>
+                          <td className="p-2 text-right font-bold">{row.taxDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-800/80 font-bold print:bg-gray-200 text-white print:text-black">
+                        <td colSpan={5} className="border border-slate-700 print:border-black p-2 text-right uppercase">Grand Total</td>
+                        <td className="border border-slate-700 print:border-black p-2 text-right text-blue-400 print:text-black">
+                          {totalAssessedValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="border border-slate-700 print:border-black p-2 text-center"></td>
+                        <td className="border border-slate-700 print:border-black p-2 text-right text-red-400 print:text-black">
+                          {totalTaxDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </>
+                );
               })()}
-            </tbody>
-            <tfoot>
-              <tr className="bg-slate-800/80 font-bold print:bg-gray-200 text-white print:text-black">
-                <td colSpan={7} className="border border-slate-700 print:border-black p-2 text-right uppercase">Grand Total</td>
-                <td className="border border-slate-700 print:border-black p-2 text-right text-indigo-400 print:text-black">
-                  {formatCurrency(filteredData.delinq.filter(d => filteredData.props.some(p => p.id === d.propertyId)).reduce((acc, curr) => acc + calculateTotalDue(curr.basicTaxDue, curr.sefTaxDue, curr.year).totalDue, 0)).replace('₱', '')}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+            </table>
+          </div>
         )}
 
         {reportType === "collection" && (

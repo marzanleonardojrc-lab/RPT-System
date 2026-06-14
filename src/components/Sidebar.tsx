@@ -91,11 +91,11 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, is
                     className={cn(
                       "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 text-left",
                       activeTab === item.id 
-                        ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" 
+                        ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" 
                         : "text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent"
                     )}
                   >
-                    <item.icon className={cn("w-4 h-4 shrink-0", activeTab === item.id ? "text-indigo-400" : "text-slate-500")} />
+                    <item.icon className={cn("w-4 h-4 shrink-0", activeTab === item.id ? "text-blue-400" : "text-slate-500")} />
                     <span className="truncate">{item.label}</span>
                   </button>
                 ))}

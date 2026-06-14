@@ -157,7 +157,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                 <div className="relative">
                   <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                   <input 
-                    className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none ${!isEditingProfile ? "opacity-60 cursor-not-allowed" : ""}`}
+                    className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none ${!isEditingProfile ? "opacity-60 cursor-not-allowed" : ""}`}
                     value={securityForm.name}
                     onChange={e => setSecurityForm(p => ({ ...p, name: e.target.value }))}
                     readOnly={!isEditingProfile}
@@ -170,7 +170,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                 <div className="relative">
                   <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                   <input 
-                    className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none ${!isEditingProfile ? "opacity-60 cursor-not-allowed" : ""}`}
+                    className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none ${!isEditingProfile ? "opacity-60 cursor-not-allowed" : ""}`}
                     value={securityForm.username}
                     onChange={e => setSecurityForm(p => ({ ...p, username: e.target.value.replace(/\s+/g, '').toLowerCase() }))}
                     placeholder="Add a username"
@@ -188,7 +188,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                   <input 
                     type="password"
                     placeholder="Keep current"
-                    className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none placeholder:text-slate-800 font-mono ${!isEditingProfile ? "opacity-60 cursor-not-allowed" : ""}`}
+                    className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none placeholder:text-slate-800 font-mono ${!isEditingProfile ? "opacity-60 cursor-not-allowed" : ""}`}
                     value={securityForm.newPassword}
                     onChange={e => setSecurityForm(p => ({ ...p, newPassword: e.target.value }))}
                     readOnly={!isEditingProfile}
@@ -202,7 +202,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                   <input 
                     type="password"
                     placeholder="••••••••"
-                    className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none placeholder:text-slate-800 font-mono ${!isEditingProfile ? "opacity-60 cursor-not-allowed" : ""}`}
+                    className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-sm text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none placeholder:text-slate-800 font-mono ${!isEditingProfile ? "opacity-60 cursor-not-allowed" : ""}`}
                     value={securityForm.confirmPassword}
                     onChange={e => setSecurityForm(p => ({ ...p, confirmPassword: e.target.value }))}
                     readOnly={!isEditingProfile}
@@ -216,7 +216,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
               disabled={isUpdating}
               className={`w-full py-4 rounded-2xl text-sm font-bold transition-all shadow-lg flex items-center justify-center gap-2 ${
                 isEditingProfile 
-                  ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/25" 
+                  ? "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/25" 
                   : "bg-white text-slate-900 hover:bg-slate-100"
               }`}
             >

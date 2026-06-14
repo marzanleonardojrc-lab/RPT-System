@@ -16,8 +16,9 @@ import {
   orderBy, 
   limit, 
   serverTimestamp, 
-  setDoc, 
-  getDocFromServer 
+  setDoc,
+  getDocFromServer,
+  writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -140,6 +141,7 @@ export {
   serverTimestamp,
   setDoc,
   getDocFromServer,
+  writeBatch,
   GoogleAuthProvider
 };
 

@@ -437,18 +437,18 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
   return (
     <div className="min-h-screen bg-[#0B1528] text-slate-100 flex flex-col md:flex-row relative">
       {/* BACKGROUND EFFECTS */}
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-500/5 blur-[120px] rounded-full pointer-events-none z-0" />
+      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-500/5 blur-[120px] rounded-full pointer-events-none z-0" />
       <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none z-0" />
 
       {/* SIDEBAR FOR TAXPAYERS */}
       <aside className="w-full md:w-64 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col z-10">
         <div className="p-6 border-b border-slate-800 flex flex-col gap-2 relative">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-600/15 border border-indigo-500/30 rounded-xl flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-indigo-400" />
+            <div className="w-10 h-10 bg-blue-600/15 border border-blue-500/30 rounded-xl flex items-center justify-center">
+              <Building2 className="w-5 h-5 text-blue-400" />
             </div>
             <div>
-              <h2 className="text-sm font-black text-white hover:text-indigo-400 leading-tight">DIPACULAO, AURORA</h2>
+              <h2 className="text-sm font-black text-white hover:text-blue-400 leading-tight">DIPACULAO, AURORA</h2>
               <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest font-mono">Taxpayer e-Portal</p>
             </div>
           </div>
@@ -457,7 +457,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
         {/* LOGGED IN USER REVENUE CARD */}
         <div className="p-4 mx-4 my-2 bg-slate-950 rounded-2xl border border-slate-800/80">
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center font-bold text-indigo-400 text-xs border border-indigo-500/20">
+            <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center font-bold text-blue-400 text-xs border border-blue-500/20">
               {profile?.displayName?.charAt(0) || "T"}
             </div>
             <div className="overflow-hidden">
@@ -481,7 +481,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
             onClick={() => setActiveSubTab("dashboard")}
             className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 text-xs font-black uppercase tracking-wider transition-all duration-200 ${
               activeSubTab === "dashboard"
-                ? "bg-indigo-600/15 border border-indigo-500/20 text-indigo-300 shadow-inner"
+                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
                 : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
             }`}
           >
@@ -493,7 +493,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
             onClick={() => setActiveSubTab("properties")}
             className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 text-xs font-black uppercase tracking-wider transition-all duration-200 ${
               activeSubTab === "properties"
-                ? "bg-indigo-600/15 border border-indigo-500/20 text-indigo-300 shadow-inner"
+                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
                 : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
             }`}
           >
@@ -505,7 +505,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
             onClick={() => setActiveSubTab("payments")}
             className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 justify-between text-xs font-black uppercase tracking-wider transition-all duration-200 ${
               activeSubTab === "payments"
-                ? "bg-indigo-600/15 border border-indigo-500/20 text-indigo-300 shadow-inner"
+                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
                 : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
             }`}
           >
@@ -524,7 +524,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
             onClick={() => setActiveSubTab("forms")}
             className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 text-xs font-black uppercase tracking-wider transition-all duration-200 ${
               activeSubTab === "forms"
-                ? "bg-indigo-600/15 border border-indigo-500/20 text-indigo-300 shadow-inner"
+                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
                 : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
             }`}
           >
@@ -536,7 +536,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
             onClick={() => setActiveSubTab("notices")}
             className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 text-xs font-black uppercase tracking-wider transition-all duration-200 ${
               activeSubTab === "notices"
-                ? "bg-indigo-600/15 border border-indigo-500/20 text-indigo-300 shadow-inner"
+                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
                 : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
             }`}
           >
@@ -564,8 +564,8 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6 mb-8">
             <div>
               <div className="flex items-center gap-2 mb-1.5">
-                <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                <span className="text-[10px] font-black uppercase text-indigo-400 tracking-widest font-mono">DIPACULAO TREASURY SYSTEM</span>
+                <ShieldCheck className="w-4 h-4 text-blue-400" />
+                <span className="text-[10px] font-black uppercase text-blue-400 tracking-widest font-mono">DIPACULAO TREASURY SYSTEM</span>
               </div>
               <h1 className="text-3xl font-black text-white tracking-tight leading-none uppercase">
                 {activeSubTab === "dashboard" && "Dashboard Control Center"}
@@ -577,7 +577,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
             </div>
 
             <div className="flex items-center gap-4 bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-2xl font-mono text-xs text-slate-400 shadow-md">
-              <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
+              <Calendar className="w-4 h-4 text-blue-400 shrink-0" />
               <div className="flex flex-col">
                 <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Active Fiscal Cycle</span>
                 <span className="text-[11px] font-bold text-slate-300">2026-05-23 (UTC)</span>
@@ -599,7 +599,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                   <div>
                     <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2">My Registered Properties</span>
                     <span className="text-3xl font-black text-white">{properties.length}</span>
-                    <span className="text-[10px] text-indigo-400 font-bold block mt-1 hover:underline cursor-pointer" onClick={() => setActiveSubTab("properties")}>Manage Properties &rarr;</span>
+                    <span className="text-[10px] text-blue-400 font-bold block mt-1 hover:underline cursor-pointer" onClick={() => setActiveSubTab("properties")}>Manage Properties &rarr;</span>
                   </div>
                 </div>
 
@@ -634,7 +634,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
               {/* WELCOME NOTE AND PROMPT ACTION */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* LARGE STATS CANVAS */}
-                <div className="lg:col-span-2 bg-gradient-to-br from-indigo-950/10 to-slate-900/50 p-8 rounded-3xl border border-indigo-500/10 flex flex-col justify-between min-h-[220px]">
+                <div className="lg:col-span-2 bg-gradient-to-br from-blue-950/10 to-slate-900/50 p-8 rounded-3xl border border-blue-500/10 flex flex-col justify-between min-h-[220px]">
                   <div>
                     <h2 className="text-xl font-black text-white uppercase tracking-tight mb-2">
                       Secure Dipaculao Resident e-Revenue Node
@@ -668,8 +668,8 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     Government Alerts & Deadlines
                   </h3>
                   <div className="space-y-4">
-                    <div className="p-3.5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl">
-                      <span className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">RPT Discount Prompt</span>
+                    <div className="p-3.5 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                      <span className="text-[8px] font-bold text-blue-400 uppercase tracking-widest block mb-1">RPT Discount Prompt</span>
                       <p className="text-[11px] font-bold text-slate-300 leading-snug">
                         2026 Fiscal Prompt payment discount is active: 10% Off before March 31!
                       </p>
@@ -691,7 +691,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <AlertTriangle className="w-4 h-4 text-red-400" />
                     Pending Tax Liabilities Summary
                   </h3>
-                  <button onClick={() => setActiveSubTab("payments")} className="text-xs text-indigo-400 font-bold uppercase hover:underline">
+                  <button onClick={() => setActiveSubTab("payments")} className="text-xs text-blue-400 font-bold uppercase hover:underline">
                     View Complete Billing Statement &rarr;
                   </button>
                 </div>
@@ -748,8 +748,8 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
               {/* CLAIM / LINK PROPERTY CARD */}
               <div className="bg-slate-900/60 p-6 rounded-3xl border border-slate-800 relative z-10">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center">
-                    <Link className="w-4 h-4 text-indigo-400" />
+                  <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                    <Link className="w-4 h-4 text-blue-400" />
                   </div>
                   <div>
                     <h2 className="text-sm font-black text-white uppercase tracking-wider">Claim / Link Registered Property</h2>
@@ -762,7 +762,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-sans">ARP/Tax Dec Number *</label>
                     <input
                       type="text"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl h-10 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl h-10 px-3 text-xs text-white focus:border-blue-500 outline-none"
                       placeholder="e.g. TD-2025-0012"
                       value={claimTdn}
                       onChange={e => setClaimTdn(e.target.value)}
@@ -772,7 +772,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-sans">Property Index No. (PIN)</label>
                     <input
                       type="text"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl h-10 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl h-10 px-3 text-xs text-white focus:border-blue-500 outline-none"
                       placeholder="e.g. 012-04-001..."
                       value={claimPin}
                       onChange={e => setClaimPin(e.target.value)}
@@ -782,7 +782,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-sans">Registered Owner Name *</label>
                     <input
                       type="text"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl h-10 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl h-10 px-3 text-xs text-white focus:border-blue-500 outline-none"
                       placeholder="e.g. Juan Dela Cruz"
                       value={claimOwnerName}
                       onChange={e => setClaimOwnerName(e.target.value)}
@@ -815,7 +815,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
               {/* REGISTERED PROPERTIES GRID */}
               <div>
                 <h3 className="text-xs font-black text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-indigo-400" />
+                  <Building2 className="w-4 h-4 text-blue-400" />
                   My Registered Property Portfolio ({properties.length} Items)
                 </h3>
 
@@ -836,13 +836,13 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                       return (
                         <div key={p.id} className="bg-slate-900/40 border border-slate-800/85 hover:border-slate-700/80 p-6 rounded-3xl relative overflow-hidden flex flex-col justify-between transition-all group shadow-sm">
                           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform">
-                            <Building2 className="w-20 h-20 text-indigo-400" />
+                            <Building2 className="w-20 h-20 text-blue-400" />
                           </div>
 
                           <div>
                             {/* TD NO */}
                             <div className="flex items-center justify-between gap-4 mb-3">
-                              <span className="bg-indigo-600/15 border border-indigo-500/20 text-indigo-300 rounded-lg text-[9px] px-2 py-0.5 font-bold font-mono">
+                              <span className="bg-blue-600/15 border border-blue-500/20 text-blue-300 rounded-lg text-[9px] px-2 py-0.5 font-bold font-mono">
                                 TDN: {p.tdNumber}
                               </span>
                               <span className="text-[8px] font-black uppercase text-slate-500 tracking-wider">
@@ -861,7 +861,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                               </div>
                               <div className="flex justify-between items-center text-[11px]">
                                 <span className="text-slate-500 font-bold uppercase tracking-wider block">Assessed Value</span>
-                                <span className="font-mono font-black text-indigo-300">₱{p.assessedValue.toLocaleString()}</span>
+                                <span className="font-mono font-black text-blue-300">₱{p.assessedValue.toLocaleString()}</span>
                               </div>
                               <div className="flex justify-between items-center text-[11px]">
                                 <span className="text-slate-500 font-bold uppercase tracking-wider block">Area Lot Size</span>
@@ -988,7 +988,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                           <th className="pb-3 text-right">SEF Paid</th>
                           <th className="pb-3 text-right">Penalties Paid</th>
                           <th className="pb-3 text-right">Total Net Paid</th>
-                          <th className="pb-3 text-right pr-2">Action</th>
+                          <th className="pb-3 text-right pr-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40 text-[11px]">
@@ -1010,23 +1010,25 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                                 <td className="py-2 text-right text-slate-400 font-mono">{formatCurrency(p.penaltyPaid || 0)}</td>
                                 <td className="py-2 text-right font-black text-emerald-400 font-mono">{formatCurrency(p.amountPaid)}</td>
                                 <td className="py-1 text-right pr-2">
-                                  <button
-                                    onClick={() => {
-                                      // Render a direct printable view of this receipt
-                                      setPaymentSuccessData({
-                                        orNumbers: [p.orNumber],
-                                        amountPaid: p.amountPaid,
-                                        receiptDate: new Date(p.recordedAt || p.paymentDate).toLocaleString(),
-                                        propertiesPaidCount: 1
-                                      });
-                                      setPaymentStep("success");
-                                      setIsPayModalOpen(true);
-                                    }}
-                                    className="p-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors inline-flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <Printer className="w-3 h-3" />
-                                    Receipt
-                                  </button>
+                                  <div className="table-actions">
+                                    <button
+                                      onClick={() => {
+                                        // Render a direct printable view of this receipt
+                                        setPaymentSuccessData({
+                                          orNumbers: [p.orNumber],
+                                          amountPaid: p.amountPaid,
+                                          receiptDate: new Date(p.recordedAt || p.paymentDate).toLocaleString(),
+                                          propertiesPaidCount: 1
+                                        });
+                                        setPaymentStep("success");
+                                        setIsPayModalOpen(true);
+                                      }}
+                                      className="btn-action-primary"
+                                    >
+                                      <Printer className="w-3 h-3" />
+                                      Receipt
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -1088,7 +1090,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Select Portfolio Tax Decl. Asset *</label>
                       <select
                         required
-                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl h-11 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none"
                         value={selectedPropIdForForm}
                         onChange={e => setSelectedPropIdForForm(e.target.value)}
                       >
@@ -1108,7 +1110,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                             required
                             type="text"
                             placeholder="e.g. +63 912 345 6789"
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none"
                             value={clearanceContact}
                             onChange={e => setClearanceContact(e.target.value)}
                           />
@@ -1116,7 +1118,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block col-span-1">Certificate Purpose</label>
                           <select
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none"
                             value={clearancePurpose}
                             onChange={e => setClearancePurpose(e.target.value)}
                           >
@@ -1138,7 +1140,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                             required
                             type="number"
                             placeholder="Proposed Assessment Amount..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none"
                             value={revisionProposedAssessed}
                             onChange={e => setRevisionProposedAssessed(e.target.value)}
                           />
@@ -1148,7 +1150,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                           <textarea
                             required
                             placeholder="State reasons for assessment correction (e.g., machinery depreciated, building damage, error in land dimension)..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-white focus:border-indigo-500 outline-none h-28 resize-none"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-white focus:border-blue-500 outline-none h-28 resize-none"
                             value={revisionReason}
                             onChange={e => setRevisionReason(e.target.value)}
                           />
@@ -1166,7 +1168,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                               required
                               type="text"
                               placeholder="Buyer or successor name..."
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none"
                               value={newOwnerName}
                               onChange={e => setNewOwnerName(e.target.value)}
                             />
@@ -1176,7 +1178,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                             <input
                               required
                               type="date"
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-indigo-500 outline-none font-mono"
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none font-mono"
                               value={transferDate}
                               onChange={e => setTransferDate(e.target.value)}
                             />
@@ -1188,7 +1190,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                             required
                             type="text"
                             placeholder="transferee complete residential address..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-indigo-500 outline-none"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none"
                             value={newOwnerAddress}
                             onChange={e => setNewOwnerAddress(e.target.value)}
                           />
@@ -1219,7 +1221,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                 <div className="bg-slate-900/60 rounded-3xl border border-slate-800 p-6 flex flex-col justify-between">
                   <div>
                     <h3 className="text-xs font-black text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-                      <FileCheck className="w-4 h-4 text-indigo-400" />
+                      <FileCheck className="w-4 h-4 text-blue-400" />
                       Submitted Requests Tracker
                     </h3>
                     <p className="text-[11px] text-slate-500 mb-6">Real-time status tracking for digital forms submitted to municipal administrators.</p>
@@ -1231,7 +1233,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                         {submittedRequests.map(r => (
                           <div key={r.id} className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-2">
                             <div className="flex justify-between items-center text-[10px]">
-                              <span className="bg-indigo-600/15 border border-indigo-500/25 text-indigo-400 rounded px-1.5 py-0.5 font-bold uppercase tracking-wide">
+                              <span className="bg-blue-600/15 border border-blue-500/25 text-blue-400 rounded px-1.5 py-0.5 font-bold uppercase tracking-wide">
                                 {r.type === "clearance" ? "Tax Clearance" : r.type === "revision" ? "Revision" : "Notice to Transfer"}
                               </span>
                               <span className={`px-2 py-0.5 font-black uppercase text-[8px] rounded-lg tracking-wider ${
@@ -1275,7 +1277,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                   {notifications.map(n => (
                     <div key={n.id} className="p-5 bg-slate-950/50 border border-slate-800/80 rounded-2xl flex gap-4 items-start hover:border-slate-700 transition-colors">
                       <div className={`p-2 rounded-xl mt-0.5 ${
-                        n.type === "discount" ? "bg-amber-500/10 text-amber-400" : n.type === "success" ? "bg-emerald-500/10 text-emerald-400" : "bg-indigo-500/10 text-indigo-400"
+                        n.type === "discount" ? "bg-amber-500/10 text-amber-400" : n.type === "success" ? "bg-emerald-500/10 text-emerald-400" : "bg-blue-500/10 text-blue-400"
                       }`}>
                         <Info className="w-5 h-5" />
                       </div>
@@ -1294,7 +1296,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
               {/* RPT FAQS CARD */}
               <div className="bg-slate-900/20 border border-slate-800 rounded-3xl p-6">
                 <h3 className="text-xs font-black text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4 text-indigo-400 animate-bounce" />
+                  <HelpCircle className="w-4 h-4 text-blue-400 animate-bounce" />
                   Real Property Tax (RPT) FAQ & Information Guidelines
                 </h3>
                 <div className="space-y-4 text-xs font-semibold text-slate-400">
@@ -1347,7 +1349,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
               {paymentStep === "details" && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <span className="text-[8px] font-black uppercase text-indigo-400 tracking-widest bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-full">Secure e-Payment Gateway</span>
+                    <span className="text-[8px] font-black uppercase text-blue-400 tracking-widest bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-full">Secure e-Payment Gateway</span>
                     <h3 className="text-xl font-black text-white mt-3 uppercase tracking-tight">RPT Electronic Remittance</h3>
                     <p className="text-xs text-slate-500">Settle outstanding balances via state-integrated digital providers.</p>
                   </div>
@@ -1360,7 +1362,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <div className="h-px bg-slate-800/50" />
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-400 font-black uppercase tracking-wider block">Amount Payable Net</span>
-                      <span className="text-xl font-bold font-mono text-indigo-400">₱{getSubTotalSelected().toLocaleString()}</span>
+                      <span className="text-xl font-bold font-mono text-blue-400">₱{getSubTotalSelected().toLocaleString()}</span>
                     </div>
                   </div>
 
@@ -1395,7 +1397,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                         onClick={() => setPaymentMethod("card")}
                         className={`p-3.5 rounded-2xl border transition-all text-xs font-black uppercase tracking-wider text-center cursor-pointer ${
                           paymentMethod === "card"
-                            ? "bg-indigo-600/10 border-indigo-500 text-indigo-400 shadow-inner"
+                            ? "bg-blue-600/10 border-blue-500 text-blue-400 shadow-inner"
                             : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700 hover:text-white"
                         }`}
                       >
@@ -1419,7 +1421,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-sans">Verification Reference Confirmation Number</label>
                     <input
                       type="text"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-indigo-500 outline-none font-mono"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none font-mono"
                       placeholder="Enter mobile wallet transaction ID..."
                       value={cashTendered}
                       onChange={e => setCashTendered(e.target.value)}
@@ -1449,7 +1451,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
               {/* PROCESSING SCREEN */}
               {paymentStep === "processing" && (
                 <div className="py-12 flex flex-col items-center justify-center gap-4 text-center">
-                  <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+                  <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
                   <p className="text-white font-bold tracking-widest text-xs uppercase animate-pulse">Processing Remittance Secures...</p>
                   <p className="text-slate-500 text-[9px] font-mono">DIPACULAO_COMM_LINK_ENCRYPTED_VALIDATING_OR</p>
                 </div>
@@ -1500,7 +1502,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <button
                       type="button"
                       onClick={handlePrintReceipt}
-                      className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-indigo-400 border border-slate-700/60 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer"
+                      className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700/60 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <Printer className="w-4 h-4" />
                       Print e-Receipt

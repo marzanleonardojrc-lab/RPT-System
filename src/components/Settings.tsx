@@ -12,7 +12,8 @@ import {
   setDoc,
   query,
   where,
-  getDocs
+  getDocs,
+  writeBatch
 } from "../lib/firebase";
 import { UserProfile, UserRole, Property } from "../types";
 import { initializeApp, getApps } from "firebase/app";
@@ -28,7 +29,7 @@ import { toISODateSafe } from "../lib/utils";
 const Settings: React.FC = () => {
   const { profile, updateUserName, updateUserUsername, updateUserPassword } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [activeSubTab, setActiveSubTab] = useState<"active" | "pending" | "provision">("active");
+  const [activeSubTab, setActiveSubTab] = useState<"active" | "pending" | "provision" | "maintenance">("active");
   
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     return (localStorage.getItem("theme") as "dark" | "light") || "dark";
@@ -309,13 +310,13 @@ const Settings: React.FC = () => {
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-xl">
             <button 
               onClick={() => setActiveSubTab("active")}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeSubTab === "active" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-white"}`}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeSubTab === "active" ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white"}`}
             >
               Registered Users
             </button>
             <button 
               onClick={() => setActiveSubTab("pending")}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeSubTab === "pending" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-white"}`}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeSubTab === "pending" ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white"}`}
             >
               Pending Requests
               {pendingUsers.length > 0 && (
@@ -326,10 +327,17 @@ const Settings: React.FC = () => {
             </button>
             <button 
               onClick={() => setActiveSubTab("provision")}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeSubTab === "provision" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-white"}`}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeSubTab === "provision" ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white"}`}
             >
               <UserPlus className="w-3.5 h-3.5" />
               Provision Resident
+            </button>
+            <button 
+              onClick={() => setActiveSubTab("maintenance")}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeSubTab === "maintenance" ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white"}`}
+            >
+              <Shield className="w-3.5 h-3.5" />
+              Maintenance
             </button>
           </div>
         </div>
@@ -351,11 +359,11 @@ const Settings: React.FC = () => {
             onClick={() => handleThemeChange("dark")}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
               theme === "dark" 
-                ? "bg-slate-800 text-indigo-400 border border-slate-700 shadow-md" 
+                ? "bg-slate-800 text-blue-400 border border-slate-700 shadow-md" 
                 : "text-slate-500 hover:text-slate-300"
             }`}
           >
-            <Moon className="w-3.5 h-3.5 text-indigo-400" />
+            <Moon className="w-3.5 h-3.5 text-blue-400" />
             <span>Default Dark</span>
           </button>
           <button
@@ -373,7 +381,99 @@ const Settings: React.FC = () => {
       </div>
 
       <AnimatePresence mode="wait">
-        {activeSubTab === "provision" ? (
+        {activeSubTab === "maintenance" ? (
+          <motion.div
+            key="maintenance-panel"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.25 }}
+            className="bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-800 p-6 md:p-8 shadow-xl mt-6 max-w-4xl mx-auto space-y-6"
+          >
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-4 mb-6">
+              <Shield className="w-5 h-5 text-blue-400" />
+              <div>
+                <h3 className="text-lg font-bold text-white tracking-tight">Database Integrity Maintenance</h3>
+                <p className="text-slate-400 text-xs">Run specialized operations to ensure index linking and constraint validity.</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
+              <h4 className="text-sm font-bold text-white mb-2">Cleanup Orphan Records</h4>
+              <p className="text-xs text-slate-400 mb-4">
+                Removes payment transactions (O.R. numbers) and delinquencies that are incorrectly attached to a property that has been permanently deleted from the registry. Running this frees up those Official Receipts for reuse.
+              </p>
+              
+              <button
+                onClick={async () => {
+                  try {
+                    setConfirmDialog({
+                      isOpen: true,
+                      title: "Purge Orphan Records?",
+                      message: "This will run a database scan. Any payments or delinquencies whose parent Property ID no longer exists will be permenantly removed from Firebase. Proceed?",
+                      type: "warning",
+                      onConfirm: async () => {
+                        const batch = writeBatch(db);
+                        let orphanCount = 0;
+                        const propsQuery = await getDocs(collection(db, "properties"));
+                        const validIds = new Set(propsQuery.docs.map(doc => doc.id));
+                        
+                        const pmtsQuery = await getDocs(collection(db, "payments"));
+                        for (const docSnap of pmtsQuery.docs) {
+                          const data = docSnap.data();
+                          if (!validIds.has(data.propertyId)) {
+                            batch.delete(docSnap.ref);
+                            orphanCount++;
+                          }
+                        }
+                        
+                        const dlqQuery = await getDocs(collection(db, "delinquencies"));
+                        for (const docSnap of dlqQuery.docs) {
+                          const data = docSnap.data();
+                          if (!validIds.has(data.propertyId)) {
+                            batch.delete(docSnap.ref);
+                            orphanCount++;
+                          }
+                        }
+
+                        if (orphanCount > 0) {
+                          await batch.commit();
+                          alert(`Success! Purged ${orphanCount} orphan records.`);
+                        } else {
+                          alert(`Database is perfectly clean. No orphan records found.`);
+                        }
+                      }
+                    });
+                  } catch (err: any) {
+                    alert(`Error: ${err.message}`);
+                  }
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-xs"
+              >
+                Scan and Purge
+              </button>
+            </div>
+            
+            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
+              <h4 className="text-sm font-bold text-white mb-2 ml-1">Example SQL Reference</h4>
+              <p className="text-xs text-slate-400 mb-4 ml-1">
+                If migrating this logic to MySQL in the future, the equivalent cleanup query would be:
+              </p>
+              <pre className="bg-slate-950 p-4 rounded-lg text-emerald-400 font-mono text-[11px] overflow-x-auto border border-slate-800">
+                {`-- Delete orphan payments
+DELETE p FROM payments p
+LEFT JOIN properties prop ON p.propertyId = prop.id
+WHERE prop.id IS NULL;
+
+-- Delete orphan delinquencies
+DELETE d FROM delinquencies d
+LEFT JOIN properties prop ON d.propertyId = prop.id
+WHERE prop.id IS NULL;`}
+              </pre>
+            </div>
+            
+          </motion.div>
+        ) : activeSubTab === "provision" ? (
           <motion.div 
             key="provision-form"
             initial={{ opacity: 0, y: 15 }}
@@ -383,7 +483,7 @@ const Settings: React.FC = () => {
             className="bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-800 p-6 md:p-8 shadow-xl mt-6 max-w-4xl mx-auto"
           >
             <div className="flex items-center gap-3 border-b border-slate-800 pb-4 mb-6">
-              <UserPlus className="w-5 h-5 text-indigo-400" />
+              <UserPlus className="w-5 h-5 text-blue-400" />
               <div>
                 <h3 className="text-lg font-bold text-white tracking-tight">Provision Resident Access</h3>
                 <p className="text-slate-400 text-xs">Directly provision high-security credentials for local land and property owners.</p>
@@ -450,7 +550,7 @@ const Settings: React.FC = () => {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Enter Owner Name, PIN, or Tax Declaration Number..."
-                    className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-indigo-500 rounded-xl py-3 px-4 text-xs text-white placeholder-slate-600 outline-none transition-all"
+                    className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-blue-500 rounded-xl py-3 px-4 text-xs text-white placeholder-slate-600 outline-none transition-all"
                   />
                   
                   {searchQuery.trim().length > 0 && (
@@ -475,11 +575,11 @@ const Settings: React.FC = () => {
                             key={prop.id}
                             type="button"
                             onClick={() => handleSelectProperty(prop)}
-                            className="w-full text-left px-4 py-3 hover:bg-indigo-500/5 transition-all text-xs flex flex-col gap-1 cursor-pointer"
+                            className="w-full text-left px-4 py-3 hover:bg-blue-500/5 transition-all text-xs flex flex-col gap-1 cursor-pointer"
                           >
                             <div className="flex justify-between items-center">
                               <span className="font-bold text-white text-xs">{prop.ownerName}</span>
-                              <span className="text-[10px] bg-slate-900 border border-slate-800 text-indigo-400 font-bold px-1.5 py-0.5 rounded uppercase tracking-wider font-mono">TDN: {prop.tdNumber}</span>
+                              <span className="text-[10px] bg-slate-900 border border-slate-800 text-blue-400 font-bold px-1.5 py-0.5 rounded uppercase tracking-wider font-mono">TDN: {prop.tdNumber}</span>
                             </div>
                             <div className="text-[10px] text-slate-400 flex items-center justify-between font-mono">
                               <span>PIN: {prop.pin || "N/A"}</span>
@@ -494,10 +594,10 @@ const Settings: React.FC = () => {
                 </div>
 
                 {selectedProperty && (
-                  <div className="mt-3 p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-xl space-y-3">
+                  <div className="mt-3 p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl space-y-3">
                     <div className="flex justify-between items-start">
                       <div>
-                        <span className="text-[10px] text-indigo-400 font-black uppercase tracking-wider block">Linked property context</span>
+                        <span className="text-[10px] text-blue-400 font-black uppercase tracking-wider block">Linked property context</span>
                         <h4 className="text-sm font-bold text-white mt-1">{selectedProperty.ownerName}</h4>
                         <p className="text-xs text-slate-400 mt-1">{selectedProperty.detailedLocation || `${selectedProperty.barangay}, Dipaculao`}</p>
                       </div>
@@ -510,7 +610,7 @@ const Settings: React.FC = () => {
                       </button>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-4 text-[11px] font-mono border-t border-indigo-500/10 pt-3 text-slate-400">
+                    <div className="grid grid-cols-2 gap-4 text-[11px] font-mono border-t border-blue-500/10 pt-3 text-slate-400">
                       <div>
                         <span className="text-slate-500 block text-[9px] uppercase font-sans font-black tracking-widest">Tax Declaration No. (TDN)</span>
                         <span className="text-white font-bold">{selectedProperty.tdNumber}</span>
@@ -525,7 +625,7 @@ const Settings: React.FC = () => {
                       </div>
                       <div>
                         <span className="text-slate-500 block text-[9px] uppercase font-sans font-black tracking-widest">Property Class</span>
-                        <span className="text-indigo-300 font-bold">{selectedProperty.classification}</span>
+                        <span className="text-blue-300 font-bold">{selectedProperty.classification}</span>
                       </div>
                     </div>
                   </div>
@@ -552,7 +652,7 @@ const Settings: React.FC = () => {
                     value={provUsername}
                     onChange={(e) => setProvUsername(e.target.value)}
                     placeholder="Defaults to TDN"
-                    className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-indigo-500 rounded-xl py-3 px-4 text-xs text-white placeholder-slate-600 outline-none transition-all font-mono"
+                    className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-blue-500 rounded-xl py-3 px-4 text-xs text-white placeholder-slate-600 outline-none transition-all font-mono"
                   />
                 </div>
 
@@ -563,7 +663,7 @@ const Settings: React.FC = () => {
                     value={provPassword}
                     onChange={(e) => setProvPassword(e.target.value)}
                     placeholder="Minimum 6 characters"
-                    className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-indigo-500 rounded-xl py-3 px-4 text-xs text-white placeholder-slate-600 outline-none transition-all font-mono"
+                    className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-blue-500 rounded-xl py-3 px-4 text-xs text-white placeholder-slate-600 outline-none transition-all font-mono"
                   />
                 </div>
 
@@ -574,7 +674,7 @@ const Settings: React.FC = () => {
                     value={provEmail}
                     onChange={(e) => setProvEmail(e.target.value)}
                     placeholder="Leave empty for auto-generated portal mail"
-                    className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-indigo-500 rounded-xl py-3 px-4 text-xs text-white placeholder-slate-600 outline-none transition-all font-mono"
+                    className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-blue-500 rounded-xl py-3 px-4 text-xs text-white placeholder-slate-600 outline-none transition-all font-mono"
                   />
                 </div>
               </div>
@@ -596,7 +696,7 @@ const Settings: React.FC = () => {
                 <button
                   type="submit"
                   disabled={provLoading || !selectedProperty}
-                  className="px-6 py-3 bg-indigo-500 hover:bg-indigo-600 text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-indigo-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {provLoading ? (
                     <>
@@ -636,7 +736,7 @@ const Settings: React.FC = () => {
                   <tr key={user.uid} className="hover:bg-slate-800/10 group transition-all duration-300">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-slate-800 flex items-center justify-center text-indigo-400 font-bold border border-slate-700/50 text-sm shadow-inner group-hover:border-indigo-500/30 transition-colors">
+                        <div className="w-10 h-10 rounded-2xl bg-slate-800 flex items-center justify-center text-blue-400 font-bold border border-slate-700/50 text-sm shadow-inner group-hover:border-blue-500/30 transition-colors">
                           {user.displayName?.charAt(0) || <AlertCircle className="w-4 h-4 text-amber-500/50" />}
                         </div>
                         <div>
@@ -661,7 +761,7 @@ const Settings: React.FC = () => {
                     <td className="px-6 py-4">
                       {user.status === "Approved" ? (
                         <select 
-                          className={`text-[10px] border border-slate-700 rounded-lg px-3 py-1.5 bg-slate-900 text-white font-bold uppercase tracking-widest outline-none focus:ring-1 focus:ring-indigo-500/50 cursor-pointer ${user.role === 'Admin' ? 'text-red-400 border-red-500/20' : user.role === 'Guest' ? 'text-slate-400 border-slate-500/20' : 'text-indigo-400 border-indigo-500/20'}`}
+                          className={`text-[10px] border border-slate-700 rounded-lg px-3 py-1.5 bg-slate-900 text-white font-bold uppercase tracking-widest outline-none focus:ring-1 focus:ring-blue-500/50 cursor-pointer ${user.role === 'Admin' ? 'text-red-400 border-red-500/20' : user.role === 'Guest' ? 'text-slate-400 border-slate-500/20' : 'text-blue-400 border-blue-500/20'}`}
                           value={user.role || 'User'}
                           onChange={(e) => updateRole(user.uid, e.target.value as UserRole)}
                         >
@@ -681,36 +781,32 @@ const Settings: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 text-right">
                       {user.status === "Pending" ? (
-                        <div className="flex justify-end gap-2">
+                        <div className="table-actions">
                             <button 
                               onClick={() => handleApproval(user.uid, "Denied")}
-                              className="p-2 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
+                              className="btn-action-destructive"
                               title="Reject Request"
                             >
-                              <X className="w-5 h-5" />
+                              <X className="w-4 h-4" /> Reject
                             </button>
                             <button 
                               onClick={() => handleApproval(user.uid, "Approved")}
-                              className="p-2 text-slate-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-xl transition-all border border-transparent hover:border-emerald-500/30"
+                              className="btn-action-positive"
                               title="Approve Member"
                             >
-                              <Check className="w-5 h-5" />
+                              <Check className="w-4 h-4" /> Approve
                             </button>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-end gap-3">
+                        <div className="table-actions">
                           <span className="text-[9px] text-slate-500 font-mono italic opacity-50 hidden md:inline">
                             {toISODateSafe(user.createdAt)}
                           </span>
                           {user.email !== profile?.email && user.uid && (
-                            <div className="flex items-center gap-2">
+                            <>
                               <button
                                 onClick={() => updateRole(user.uid, user.role === 'Admin' ? 'User' : 'Admin')}
-                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border ${
-                                  user.role === 'Admin' 
-                                    ? 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500/20' 
-                                    : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/20'
-                                }`}
+                                className={user.role === 'Admin' ? 'btn-action-destructive' : 'btn-action-positive'}
                               >
                                 {user.role === 'Admin' ? 'Revoke Admin' : 'Grant Admin'}
                               </button>
@@ -741,12 +837,12 @@ const Settings: React.FC = () => {
                                     }
                                   });
                                 }}
-                                className="px-3 py-1.5 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-rose-500/20 group/btn transition-all font-sans flex items-center gap-2"
+                                className="btn-action-destructive group/btn"
                               >
                                 <X className="w-3 h-3 group-hover/btn:rotate-90 transition-transform" />
                                 Remove
                               </motion.button>
-                            </div>
+                            </>
                           )}
                           {user.email === profile?.email && (
                              <span className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-slate-600 border border-slate-800 bg-slate-900/50">
@@ -756,7 +852,7 @@ const Settings: React.FC = () => {
                           {user.status === "Denied" && user.email !== profile?.email && (
                             <button 
                               onClick={() => handleApproval(user.uid, "Approved")}
-                              className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-emerald-500/20 transition-all"
+                              className="btn-action-positive"
                             >
                               Re-Approve
                             </button>

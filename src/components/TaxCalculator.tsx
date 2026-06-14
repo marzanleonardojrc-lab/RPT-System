@@ -135,8 +135,8 @@ export const TaxCalculator: React.FC = () => {
       <div>
         {/* Header */}
         <div className="flex items-center gap-3.5 mb-6 border-b border-slate-800/60 pb-5">
-          <div className="w-11 h-11 bg-indigo-500/10 rounded-2xl flex items-center justify-center border border-indigo-500/20">
-            <Calculator className="w-5 h-5 text-indigo-400" />
+          <div className="w-11 h-11 bg-blue-500/10 rounded-2xl flex items-center justify-center border border-blue-500/20">
+            <Calculator className="w-5 h-5 text-blue-400" />
           </div>
           <div>
             <h3 className="text-base font-black text-white uppercase tracking-tighter">Tax Simulator</h3>
@@ -155,7 +155,7 @@ export const TaxCalculator: React.FC = () => {
               <span className="absolute left-4 top-2.5 text-sm font-bold text-slate-600">₱</span>
               <input
                 type="text"
-                className="w-full pl-8 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-sm leading-relaxed"
+                className="w-full pl-8 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono text-sm leading-relaxed"
                 value={assessedValueInput}
                 onChange={handleValueChange}
                 onBlur={handleBlur}
@@ -172,7 +172,7 @@ export const TaxCalculator: React.FC = () => {
                 Classification
               </label>
               <select
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer text-xs"
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer text-xs"
                 value={classification}
                 onChange={e => setClassification(e.target.value as any)}
               >
@@ -188,7 +188,7 @@ export const TaxCalculator: React.FC = () => {
                 Payment Timing
               </label>
               <select
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer text-xs"
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer text-xs"
                 value={timing}
                 onChange={e => setTiming(e.target.value as TimingType)}
               >
@@ -240,7 +240,7 @@ export const TaxCalculator: React.FC = () => {
                     className={cn(
                       "px-2.5 py-1 text-[9px] font-black uppercase rounded-md tracking-wider transition-all",
                       paymentMode === mode
-                        ? "bg-indigo-600 text-white"
+                        ? "bg-blue-600 text-white"
                         : "text-slate-400 hover:text-slate-200"
                     )}
                   >
@@ -282,7 +282,7 @@ export const TaxCalculator: React.FC = () => {
                   type="checkbox"
                   checked={isIdleLand}
                   onChange={e => setIsIdleLand(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0 cursor-pointer"
+                  className="w-4 h-4 rounded bg-slate-900 border-slate-800 text-blue-600 focus:ring-0 cursor-pointer"
                 />
               </div>
             )}
@@ -292,7 +292,7 @@ export const TaxCalculator: React.FC = () => {
 
       {/* Audit-grade Calculation Breakdown Panel */}
       <div className="mt-6 border-t border-slate-800/60 pt-4 space-y-3.5">
-        <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-2 pl-0.5">
+        <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-widest block mb-2 pl-0.5">
           Tax Computation Details
         </h4>
         
@@ -336,8 +336,8 @@ export const TaxCalculator: React.FC = () => {
         </div>
 
         {/* Summed Total box */}
-        <div className="p-4 bg-indigo-500/5 border border-indigo-500/15 rounded-2xl flex flex-col items-center justify-center space-y-1 mt-1 text-center">
-          <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1">
+        <div className="p-4 bg-blue-500/5 border border-blue-500/15 rounded-2xl flex flex-col items-center justify-center space-y-1 mt-1 text-center">
+          <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1">
             <ShieldCheck className="w-3.5 h-3.5" />
             Estimated Simulated Due
           </span>

@@ -5,6 +5,7 @@ import {
   addDoc, 
   updateDoc,
   doc,
+  deleteDoc,
   query,
   where,
   serverTimestamp,
@@ -32,18 +33,22 @@ import {
   FileText,
   DollarSign,
   History,
-  Trash2
+  Trash2,
+  Upload
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { logAudit } from "../lib/audit";
 import DelinquencyActions from "./DelinquencyActions";
 import { TransactionHistoryModal } from "./TransactionHistoryModal";
 
-export default function CollectionModule() {
+import { PaymentMigrator } from "./PaymentMigrator";
+
+export default function CollectionModule({ prefillProperty }: { prefillProperty?: Property | null }) {
   const { profile, isEncoder, isAdmin } = useAuth();
   const [delinquencies, setDelinquencies] = useState<Delinquency[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [isPosting, setIsPosting] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedHistoryProperty, setSelectedHistoryProperty] = useState<Property | null>(null);
@@ -149,65 +154,133 @@ export default function CollectionModule() {
     setPropSearchResults([]);
     setTaxPayer(prop.ownerName);
     
-    // Fetch all delinquencies for this property to check status accurately
-    const q = query(
-      collection(db, "delinquencies"), 
-      where("propertyId", "==", prop.id)
-    );
-    const snap = await getDocs(q);
-    const allRecords = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Delinquency));
-    
-    // We only display unpaid ones in the collection form
-    let list = allRecords.filter(d => d.status === "Delinquent" || d.status === "Pending");
-    
-    const currentYear = new Date().getFullYear();
-    const hasCurrentYear = allRecords.some(d => d.year === currentYear);
+    setIsAssessing(true);
+    try {
+      // Fetch all delinquencies for this property
+      const q = query(
+        collection(db, "delinquencies"), 
+        where("propertyId", "==", prop.id)
+      );
+      const snap = await getDocs(q);
+      const allRecords = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Delinquency));
+      
+      // Fetch all payments for this property to know what's paid
+      const pq = query(
+        collection(db, "payments"),
+        where("propertyId", "==", prop.id),
+        where("status", "==", "Active")
+      );
+      const psnap = await getDocs(pq);
+      const payments = psnap.docs.map(doc => doc.data() as Payment);
 
-    // AUTOMATION: If no existing delinquent/assessment for current year, automatically issue it
-    if (!hasCurrentYear) {
-      try {
-        setIsAssessing(true);
-        const basicTax = prop.assessedValue * BASIC_TAX_RATE;
-        const sefTax = prop.assessedValue * SEF_TAX_RATE;
-        const calc = calculateTotalDue(basicTax, sefTax, currentYear);
-
-        const newDelinq = {
-          propertyId: prop.id,
-          year: currentYear,
-          basicTaxDue: basicTax,
-          sefTaxDue: sefTax,
-          penalty: 0,
-          interest: calc.interest,
-          totalDue: calc.totalDue,
-          totalPaid: 0,
-          status: "Delinquent" as const,
-          recordedBy: profile?.username || profile?.displayName || auth.currentUser?.email || "System",
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        };
-
-        const docRef = await addDoc(collection(db, "delinquencies"), newDelinq);
-        
-        const added = { 
-          id: docRef.id, 
-          ...newDelinq, 
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        } as unknown as Delinquency;
-        
-        list.push(added);
-        await logAudit("CREATE", "Delinquency (Auto Assess)", `Year ${currentYear} for ${prop.tdNumber}`, null, newDelinq);
-      } catch (err: any) {
-        console.error("Auto Assess Error:", err);
-      } finally {
-        setIsAssessing(false);
+      const currentYear = new Date().getFullYear();
+      
+      // Determine the effective starting year for assessing delinquencies
+      let startYear = currentYear;
+      if (prop.effectivityDate) {
+        let extractedYear = NaN;
+        if (prop.effectivityDate.includes('-')) {
+          extractedYear = new Date(prop.effectivityDate).getFullYear();
+        } else {
+          extractedYear = parseInt(prop.effectivityDate, 10);
+        }
+        if (!isNaN(extractedYear)) {
+          startYear = extractedYear;
+        }
       }
-    }
+      if (startYear > currentYear) startYear = currentYear;
 
-    setAllPropertyYears(allRecords.map(r => r.year));
-    setFormDelinquencies(list.sort((a, b) => a.year - b.year));
-    setSelectedDelinqIds(new Set(list.map(d => d.id)));
+      // We only display unpaid ones in the collection form
+      let list = allRecords.filter(d => d.status === "Delinquent" || d.status === "Pending" || d.status === "NOTICE_ISSUED");
+      
+      // Deduplicate in case of React strict-mode double inserts
+      const uniqueYears = new Set<number>();
+      const duplicatesToDelete: string[] = [];
+      list = list.filter(d => {
+        if (uniqueYears.has(d.year)) {
+          duplicatesToDelete.push(d.id);
+          return false;
+        }
+        uniqueYears.add(d.year);
+        return true;
+      });
+
+      // Cleanup duplicated records from DB
+      for (const dupId of duplicatesToDelete) {
+        try {
+          await deleteDoc(doc(db, "delinquencies", dupId));
+        } catch (e) {}
+      }
+
+      let newlyCreatedCount = 0;
+
+      // Automate generation of missing delinquency records up to current year
+      for (let y = startYear; y <= currentYear; y++) {
+        const hasDelinq = allRecords.some(d => d.year === y);
+        const hasPayment = payments.some(p => p.taxYear === y);
+
+        if (!hasDelinq && !hasPayment) {
+          const basicTax = prop.assessedValue * BASIC_TAX_RATE;
+          const sefTax = prop.assessedValue * SEF_TAX_RATE;
+          const calc = calculateTotalDue(basicTax, sefTax, y);
+
+          const newDelinq = {
+            propertyId: prop.id,
+            year: y,
+            basicTaxDue: basicTax,
+            sefTaxDue: sefTax,
+            penalty: 0,
+            interest: calc.interest,
+            totalDue: calc.totalDue,
+            totalPaid: 0,
+            status: y === currentYear ? "Pending" : "Delinquent" as const,
+            recordedBy: profile?.username || profile?.displayName || auth.currentUser?.email || "System",
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          };
+
+          const docRef = await addDoc(collection(db, "delinquencies"), newDelinq);
+          
+          const added = { 
+            id: docRef.id, 
+            ...newDelinq, 
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          } as unknown as Delinquency;
+          
+          list.push(added);
+          allRecords.push(added); // update local copy too for later
+          newlyCreatedCount++;
+          
+          // Log only for the current year or if bulk
+          if (y === currentYear) {
+             await logAudit("CREATE", "Delinquency (Auto Assess)", `Year ${y} for ${prop.tdNumber}`, null, newDelinq);
+          }
+        }
+      }
+      
+      if (newlyCreatedCount > 1) {
+        // Just log a bulk event if multiple were generated (historic gaps)
+         await logAudit("CREATE", "Delinquency (Auto Assess Bulk)", `Generated ${newlyCreatedCount} missing records for ${prop.tdNumber}`, null, { count: newlyCreatedCount });
+      }
+
+      setAllPropertyYears(allRecords.map(r => r.year));
+      setFormDelinquencies(list.sort((a, b) => a.year - b.year));
+      setSelectedDelinqIds(new Set(list.map(d => d.id)));
+
+    } catch (err: any) {
+      console.error("Data Fetch/Auto-Assess Error:", err);
+    } finally {
+      setIsAssessing(false);
+    }
   };
+
+  useEffect(() => {
+    if (prefillProperty) {
+      setIsPosting(true);
+      handleSelectProperty(prefillProperty);
+    }
+  }, [prefillProperty]);
 
   const handleQuarterToggle = (q: string, checked: boolean) => {
     const allQuarters = ["1st Qtr", "2nd Qtr", "3rd Qtr", "4th Qtr"];
@@ -262,48 +335,46 @@ export default function CollectionModule() {
   const formTotals = calculateFormTotals();
   const balance = cashTendered - formTotals.total;
 
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
   const handlePostPayment = async () => {
-    const errors: string[] = [];
+    const errors: Record<string, string> = {};
     
     if (!selectedProperty) {
-      errors.push("• No property selected. Please search and select a tax declaration.");
+      errors.property = "Property is required.";
     }
     if (selectedDelinqIds.size === 0) {
-      errors.push("• No tax records selected for payment. Check at least one record.");
+      errors.records = "Select at least one record.";
     }
     if (!orNumber.trim()) {
-      errors.push("• O.R. Number is required.");
+      errors.orNumber = "O.R. Number is required.";
     }
     if (!orDate) {
-      errors.push("• O.R. Date is required.");
+      errors.orDate = "O.R. Date is required.";
     }
     if (!taxPayer.trim()) {
-      errors.push("• Tax Payer name is required.");
+      errors.taxPayer = "Tax Payer name is required.";
     }
     if (!treasurer.trim()) {
-      errors.push("• Treasurer name is required.");
+      errors.treasurer = "Treasurer name is required.";
     }
     if (!deputy.trim()) {
-      errors.push("• Deputy name is required.");
+      errors.deputy = "Deputy name is required.";
     }
     if (paymentMode === "Installment" && quarters.length === 0) {
-      errors.push("• At least one quarter must be selected for installment payments.");
+      errors.quarters = "Select at least one quarter.";
     }
     if (cashTendered <= 0) {
-      errors.push("• Cash Tendered is required.");
+      errors.cashTendered = "Cash Tendered is required.";
     } else if (cashTendered < (formTotals.total - 0.01)) {
-      errors.push(`• Insufficient funds: Tendered ₱${cashTendered.toLocaleString()} vs required ₱${formTotals.total.toLocaleString()}.`);
+      errors.cashTendered = "Insufficient funds.";
     }
 
-    if (errors.length > 0) {
-      setErrorDialog({
-        isOpen: true,
-        title: "Missing or Invalid Fields",
-        message: "Please correct the following issues before proceeding:\n\n" + errors.join("\n"),
-        type: "danger"
-      });
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
+    setFieldErrors({});
 
     setIsSubmitting(true);
 
@@ -385,7 +456,7 @@ export default function CollectionModule() {
       );
       const orSnap = await getDocs(orQuery);
       if (!orSnap.empty) {
-        throw new Error(`CRITICAL: Duplicate O.R. detected. The Official Receipt Number '${orNumber}' has already been used in a settled transaction.`);
+        throw new Error(`CRITICAL: Duplicate O.R. detected. The Official Receipt Number '${orNumber}' has already been recorded and is currently active.`);
       }
 
       const batchRows = displayRows.filter(row => row.ids.every(id => selectedDelinqIds.has(id)));
@@ -410,7 +481,7 @@ export default function CollectionModule() {
               interest: 0,
               totalDue: dataRecord.basicTaxDue + dataRecord.sefTaxDue,
               totalPaid: 0,
-              status: "Delinquent" as const,
+              status: "Pending" as const,
               recordedBy: profile?.username || profile?.displayName || auth.currentUser?.email || "System",
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
@@ -565,9 +636,12 @@ export default function CollectionModule() {
       
       const groupedPmts: Record<string, any> = {};
       matched.forEach((p: any) => {
+        const prop = properties.find(prop => prop.id === p.propertyId);
+        const tdn = prop?.tdNumber || "—";
         if (!groupedPmts[p.orNumber]) {
           groupedPmts[p.orNumber] = {
             ...p,
+            tdNumber: tdn,
             years: [p.taxYear],
             totalAmount: p.amountPaid
           };
@@ -746,6 +820,7 @@ export default function CollectionModule() {
   };
 
   const resetForm = () => {
+    setFieldErrors({});
     setSelectedProperty(null);
     setFormDelinquencies([]);
     setAllPropertyYears([]);
@@ -797,13 +872,22 @@ export default function CollectionModule() {
           <p className="text-slate-500 text-sm mt-1">Audit log of validated tax payments and property clearances.</p>
         </div>
         {isEncoder && (
-          <button 
-            onClick={() => setIsPosting(true)}
-            className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-500 transition shadow-lg shadow-indigo-600/20 font-bold text-xs uppercase tracking-wider"
-          >
-            <Receipt className="w-4 h-4" />
-            Post Payment Record
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setIsMigrating(true)}
+              className="flex items-center gap-2 px-6 py-2.5 bg-transparent border border-blue-500/50 text-blue-400 rounded-xl hover:bg-blue-500/10 hover:border-blue-500 transition font-bold text-xs uppercase tracking-wider"
+            >
+              <Upload className="w-4 h-4" />
+              Migrate Data
+            </button>
+            <button 
+              onClick={() => setIsPosting(true)}
+              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition shadow-lg shadow-blue-600/20 font-bold text-xs uppercase tracking-wider"
+            >
+              <Receipt className="w-4 h-4" />
+              Post Payment Record
+            </button>
+          </div>
         )}
       </div>
 
@@ -815,7 +899,7 @@ export default function CollectionModule() {
             <input 
               type="text" 
               placeholder="Search paid records by Owner or TDN..." 
-              className="w-full pl-10 pr-4 py-2 border border-slate-800 rounded-xl bg-slate-950 text-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+              className="w-full pl-10 pr-4 py-2 border border-slate-800 rounded-xl bg-slate-950 text-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
@@ -835,7 +919,7 @@ export default function CollectionModule() {
             </thead>
             <tbody className="divide-y divide-slate-800">
               {groupedPaid.map((group: any) => (
-                <tr key={group.property.id} className="hover:bg-indigo-500/[0.02] transition-colors">
+                <tr key={group.property.id} className="hover:bg-blue-500/[0.02] transition-colors">
                   <td className="px-6 py-5">
                     <div className="flex flex-col">
                       <span className="font-bold text-slate-200 text-sm tracking-tight">{group.property.ownerName}</span>
@@ -844,7 +928,7 @@ export default function CollectionModule() {
                   </td>
                   <td className="px-6 py-5 text-xs text-slate-400 text-center font-bold tracking-widest">
                     {group.minYear === group.maxYear ? group.minYear : `${group.minYear} – ${group.maxYear}`}
-                    <div className="text-[10px] text-indigo-500 mt-0.5">{group.records.length} paid record(s)</div>
+                    <div className="text-[10px] text-blue-500 mt-0.5">{group.records.length} paid record(s)</div>
                   </td>
                   <td className="px-6 py-5 text-sm text-emerald-400 font-black">
                     {formatCurrency(group.totalPaid)}
@@ -858,33 +942,11 @@ export default function CollectionModule() {
                   <td className="px-6 py-5 text-right font-bold uppercase tracking-widest flex items-center justify-end gap-2">
                     <button 
                       onClick={() => setSelectedHistoryProperty(group.property)}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600/10 hover:bg-indigo-500 hover:text-white text-indigo-400 rounded-lg text-[10px] transition-all border border-indigo-500/20 font-black cursor-pointer"
+                      className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/10 hover:bg-blue-500 hover:text-white text-blue-400 rounded-lg text-[10px] transition-all border border-blue-500/20 font-black cursor-pointer"
                     >
                       <History className="w-3.5 h-3.5" />
-                      PMT HISTORY
+                      View Payment History
                     </button>
-                    <button 
-                      onClick={() => {
-                        setActiveActionDelinq(group.records[0]);
-                        setActionTab("audit");
-                      }}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] transition-colors border border-slate-700 font-bold"
-                    >
-                      <History className="w-3.5 h-3.5 text-slate-450" />
-                      AUDIT TRAIL
-                    </button>
-                    {isEncoder && (
-                      <button 
-                        onClick={() => {
-                          setActiveActionDelinq(group.records[0]);
-                          setActionTab("void");
-                        }}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-red-500/10 text-slate-300 hover:text-red-400 rounded-lg text-[10px] transition-colors border border-slate-700 hover:border-red-500/20"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        VOID RECORD
-                      </button>
-                    )}
                   </td>
                 </tr>
               ))}
@@ -944,8 +1006,8 @@ export default function CollectionModule() {
               {/* MODAL HEADER */}
               <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
                 <div className="flex items-center gap-4">
-                  <div className="p-3 bg-indigo-500/10 rounded-2xl">
-                    <DollarSign className="w-6 h-6 text-indigo-400" />
+                  <div className="p-3 bg-blue-500/10 rounded-2xl">
+                    <DollarSign className="w-6 h-6 text-blue-400" />
                   </div>
                   <div>
                     <h3 className="text-xl font-black text-white uppercase tracking-tighter">Collection Registry</h3>
@@ -969,13 +1031,13 @@ export default function CollectionModule() {
                       value={orNumber}
                       onChange={e => setOrNumber(e.target.value)}
                       disabled={isSubmitting || isReadOnlyForm}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
+                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white font-mono text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.orNumber ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
                       placeholder="Receipt Number..."
                     />
                   </div>
-                  <div className="row-span-2 h-[72px] p-2 bg-slate-950 border border-slate-800 rounded-lg flex flex-col relative group">
+                  <div className={cn("row-span-2 h-[72px] p-2 bg-slate-950 border rounded-lg flex flex-col relative group", fieldErrors.quarters ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800")}>
                      <div className="flex items-center justify-between border-b border-slate-800/50 pb-0.5 mb-1.5">
-                       <label className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest block">Payment Mode</label>
+                       <label className="text-[8px] font-bold text-blue-400 uppercase tracking-widest block">Payment Mode</label>
                        <label className={cn("flex items-center gap-1.5", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
                          <input 
                            type="checkbox" 
@@ -990,7 +1052,7 @@ export default function CollectionModule() {
                      <div className="grid grid-cols-3 grid-rows-2 gap-x-4 gap-y-1.5 flex-1 items-center">
                        {/* ROW 1 */}
                        <label className={cn("flex items-center gap-2 group", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
-                         <input type="radio" checked={paymentMode === "Full"} onChange={() => setPaymentMode("Full")} disabled={isSubmitting || isReadOnlyForm} className="w-3 h-3 accent-indigo-500 disabled:opacity-50" />
+                         <input type="radio" checked={paymentMode === "Full"} onChange={() => setPaymentMode("Full")} disabled={isSubmitting || isReadOnlyForm} className="w-3 h-3 accent-blue-500 disabled:opacity-50" />
                          <span className="text-[9px] font-bold text-slate-300 group-hover:text-white transition-colors">Full</span>
                        </label>
                        <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
@@ -999,7 +1061,7 @@ export default function CollectionModule() {
                            checked={quarters.includes("1st Qtr")}
                            disabled={paymentMode === "Full" || isReadOnlyForm}
                            onChange={e => handleQuarterToggle("1st Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-indigo-500 disabled:opacity-50" 
+                           className="w-2.5 h-2.5 accent-blue-500 disabled:opacity-50" 
                          />
                          <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">1st quarter</span>
                        </label>
@@ -1009,14 +1071,14 @@ export default function CollectionModule() {
                            checked={quarters.includes("3rd Qtr")}
                            disabled={paymentMode === "Full" || isReadOnlyForm}
                            onChange={e => handleQuarterToggle("3rd Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-indigo-500 disabled:opacity-50" 
+                           className="w-2.5 h-2.5 accent-blue-500 disabled:opacity-50" 
                          />
                          <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">3rd quarter</span>
                        </label>
 
                        {/* ROW 2 */}
                        <label className={cn("flex items-center gap-2 group", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
-                         <input type="radio" checked={paymentMode === "Installment"} onChange={() => setPaymentMode("Installment")} disabled={isSubmitting || isReadOnlyForm} className="w-3 h-3 accent-indigo-500 disabled:opacity-50" />
+                         <input type="radio" checked={paymentMode === "Installment"} onChange={() => { setPaymentMode("Installment"); setQuarters(["1st Qtr", "2nd Qtr", "3rd Qtr", "4th Qtr"]); }} disabled={isSubmitting || isReadOnlyForm} className="w-3 h-3 accent-blue-500 disabled:opacity-50" />
                          <span className="text-[9px] font-bold text-slate-300 group-hover:text-white transition-colors">Installment</span>
                        </label>
                        <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
@@ -1025,7 +1087,7 @@ export default function CollectionModule() {
                            checked={quarters.includes("2nd Qtr")}
                            disabled={paymentMode === "Full" || isReadOnlyForm}
                            onChange={e => handleQuarterToggle("2nd Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-indigo-500 disabled:opacity-50" 
+                           className="w-2.5 h-2.5 accent-blue-500 disabled:opacity-50" 
                          />
                          <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">2nd quarter</span>
                        </label>
@@ -1035,7 +1097,7 @@ export default function CollectionModule() {
                            checked={quarters.includes("4th Qtr")}
                            disabled={paymentMode === "Full" || isReadOnlyForm}
                            onChange={e => handleQuarterToggle("4th Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-indigo-500 disabled:opacity-50" 
+                           className="w-2.5 h-2.5 accent-blue-500 disabled:opacity-50" 
                          />
                          <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">4th quarter</span>
                        </label>
@@ -1050,7 +1112,7 @@ export default function CollectionModule() {
                       value={orDate}
                       onChange={e => setOrDate(e.target.value)}
                       disabled={isReadOnlyForm}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
+                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white font-mono text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.orDate ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
                     />
                   </div>
 
@@ -1064,7 +1126,7 @@ export default function CollectionModule() {
                         <button
                           type="button"
                           onClick={() => setSelectedHistoryProperty(selectedProperty)}
-                          className="px-2 py-0.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 rounded text-[9px] border border-indigo-500/20 hover:border-indigo-500/30 transition-all font-black uppercase tracking-wider cursor-pointer"
+                          className="px-2 py-0.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded text-[9px] border border-blue-500/20 hover:border-blue-500/30 transition-all font-black uppercase tracking-wider cursor-pointer"
                         >
                           Show History
                         </button>
@@ -1079,7 +1141,7 @@ export default function CollectionModule() {
                         value={propSearch}
                         onChange={e => setPropSearch(e.target.value)}
                         disabled={isReadOnlyForm}
-                        className="w-full h-8 bg-slate-950 border border-slate-800 rounded-lg pl-3 pr-8 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
+                        className={cn("w-full h-8 bg-slate-950 border rounded-lg pl-3 pr-8 text-white text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.property ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
                         placeholder="Search property..."
                       />
                       <Search className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -1089,7 +1151,7 @@ export default function CollectionModule() {
                             <button 
                               key={p.id}
                               onClick={() => handleSelectProperty(p)}
-                              className="w-full p-2 text-left hover:bg-indigo-500/10 border-b border-slate-800 last:border-0 transition-colors"
+                              className="w-full p-2 text-left hover:bg-blue-500/10 border-b border-slate-800 last:border-0 transition-colors"
                             >
                               <p className="text-[10px] font-bold text-white uppercase">{p.tdNumber}</p>
                               <p className="text-[8px] text-slate-500">{p.ownerName}</p>
@@ -1136,7 +1198,7 @@ export default function CollectionModule() {
                       value={taxPayer}
                       onChange={e => setTaxPayer(e.target.value)}
                       disabled={isReadOnlyForm}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
+                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.taxPayer ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
                     />
                   </div>
                   <div className="grid grid-cols-3 gap-2 items-center h-8">
@@ -1154,7 +1216,7 @@ export default function CollectionModule() {
                       value={treasurer}
                       onChange={e => setTreasurer(e.target.value)}
                       disabled={isReadOnlyForm}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
+                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.treasurer ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
                     />
                   </div>
                   <div className="grid grid-cols-3 gap-2 items-center h-8">
@@ -1164,13 +1226,13 @@ export default function CollectionModule() {
                       value={deputy}
                       onChange={e => setDeputy(e.target.value)}
                       disabled={isReadOnlyForm}
-                      className="col-span-2 h-8 bg-slate-950 border border-slate-800 rounded-lg px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-70 disabled:cursor-not-allowed"
+                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.deputy ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
                     />
                   </div>
                 </div>
 
                 {/* SECTION 2: MIDDLE DATA TABLE */}
-                <div className="border border-slate-800 rounded-lg overflow-hidden shadow-xl bg-slate-950/20">
+                <div className={cn("border rounded-lg overflow-hidden shadow-xl bg-slate-950/20", fieldErrors.records ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800")}>
                   <table className="w-full text-left text-[11px]">
                     <thead>
                       <tr className="bg-slate-950/50 border-b border-slate-800">
@@ -1182,7 +1244,7 @@ export default function CollectionModule() {
                         <th className="px-4 py-2 font-bold text-slate-500 uppercase tracking-widest text-[8px] text-right">SEF</th>
                         <th className="px-4 py-2 font-bold text-slate-500 uppercase tracking-widest text-[8px] text-right">Disc</th>
                         <th className="px-4 py-2 font-bold text-slate-500 uppercase tracking-widest text-[8px] text-right">Int</th>
-                        <th className="px-4 py-2 font-bold text-indigo-400 uppercase tracking-widest text-[8px] text-right">Total</th>
+                        <th className="px-4 py-2 font-bold text-blue-400 uppercase tracking-widest text-[8px] text-right">Total</th>
                         <th className="px-4 py-2 font-bold text-slate-300 uppercase tracking-widest text-[8px] text-right">Balance</th>
                       </tr>
                     </thead>
@@ -1190,7 +1252,21 @@ export default function CollectionModule() {
                       {displayRows.map(row => {
                         const isSelected = row.ids.every((id: string) => selectedDelinqIds.has(id));
                         return (
-                          <tr key={`${row.ids.join(',')}-${row.quarterLabel || 'full'}`} className={cn("hover:bg-white/[0.02] h-8", !isSelected && "opacity-50")}>
+                          <tr 
+                            key={`${row.ids.join(',')}-${row.quarterLabel || 'full'}`} 
+                            className={cn("hover:bg-white/[0.02] h-8 cursor-pointer select-none", !isSelected && "opacity-50")}
+                            onClick={(e) => {
+                              if (paymentMode === "Full" || isReadOnlyForm) return;
+                              if ((e.target as HTMLElement).tagName === 'INPUT') return;
+                              const next = new Set(selectedDelinqIds);
+                              if (!isSelected) {
+                                row.ids.forEach((id: string) => next.add(id));
+                              } else {
+                                row.ids.forEach((id: string) => next.delete(id));
+                              }
+                              setSelectedDelinqIds(next);
+                            }}
+                          >
                             <td className="px-4 py-1">
                               <input 
                                 type="checkbox" 
@@ -1202,13 +1278,13 @@ export default function CollectionModule() {
                                    else row.ids.forEach((id: string) => next.delete(id));
                                    setSelectedDelinqIds(next);
                                 }}
-                                className="w-3.5 h-3.5 accent-indigo-500" 
+                                className="w-3.5 h-3.5 accent-blue-500" 
                               />
                             </td>
                             <td className="px-4 py-1 font-mono text-slate-500">{selectedProperty?.tdNumber}</td>
                             <td className="px-4 py-1 text-center font-bold text-slate-200">
                               {row.yearDisplay}
-                              {row.type === 'group' && <span className="block text-[7px] text-indigo-500 font-black">CONSOLIDATED</span>}
+                              {row.type === 'group' && <span className="block text-[7px] text-blue-500 font-black">CONSOLIDATED</span>}
                             </td>
                             <td className="px-4 py-1 text-right text-slate-400">
                               {formatCurrency(row.assessedValue)}
@@ -1256,13 +1332,16 @@ export default function CollectionModule() {
                          <div className="flex justify-between items-start border-b border-slate-800 pb-3">
                             <div>
                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Liability amount</span>
-                               <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Total Assessment Due</span>
+                               <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Total Assessment Due</span>
                             </div>
                             <span className="text-xl font-black text-white">{formatCurrency(formTotals.total)}</span>
                          </div>
 
                          <div className="space-y-1">
-                           <label className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">Cash Tendered</label>
+                           <div className="flex justify-between items-center">
+                             <label className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">Cash Tendered</label>
+                             {fieldErrors.cashTendered && <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest">{fieldErrors.cashTendered}</span>}
+                           </div>
                            <div className="relative">
                               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 font-bold text-sm">₱</span>
                               <input 
@@ -1270,7 +1349,7 @@ export default function CollectionModule() {
                                 value={cashTendered || ""}
                                 onChange={e => setCashTendered(parseFloat(e.target.value) || 0)}
                                 disabled={isReadOnlyForm}
-                                className="w-full h-10 bg-slate-950 border border-indigo-500/30 rounded-lg pl-7 pr-3 text-lg font-black text-white focus:border-indigo-500 outline-none transition-all shadow-lg shadow-indigo-600/5 transition-all disabled:opacity-75 disabled:cursor-not-allowed"
+                                className={cn("w-full h-10 bg-slate-950 border rounded-lg pl-7 pr-3 text-lg font-black text-white outline-none transition-all shadow-lg shadow-blue-600/5 transition-all disabled:opacity-75 disabled:cursor-not-allowed", fieldErrors.cashTendered ? "border-red-500 ring-1 ring-red-500/50" : "border-blue-500/30 focus:border-blue-500")}
                                 placeholder="0.00"
                               />
                            </div>
@@ -1293,22 +1372,22 @@ export default function CollectionModule() {
                              type="button" disabled={isReadOnlyForm} onClick={() => { if (!isReadOnlyForm) { setIsCash(true); setIsCheck(false); } }}
                              className={cn(
                                "flex-1 p-2 rounded-lg border flex items-center justify-center gap-2 transition-all",
-                               isCash ? "bg-indigo-600/10 border-indigo-500 text-indigo-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
+                               isCash ? "bg-blue-600/10 border-blue-500 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
                                isReadOnlyForm && "opacity-50 cursor-not-allowed"
                              )}
                            >
-                             <div className={cn("w-3 h-3 rounded-full border-2", isCash ? "bg-indigo-500 border-indigo-400" : "border-slate-700")} />
+                             <div className={cn("w-3 h-3 rounded-full border-2", isCash ? "bg-blue-500 border-blue-400" : "border-slate-700")} />
                              <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Cash Settlement</span>
                            </button>
                            <button 
                              type="button" disabled={isReadOnlyForm} onClick={() => { if (!isReadOnlyForm) { setIsCash(false); setIsCheck(true); } }}
                              className={cn(
                                "flex-1 p-2 rounded-lg border flex items-center justify-center gap-2 transition-all",
-                               isCheck ? "bg-indigo-600/10 border-indigo-500 text-indigo-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
+                               isCheck ? "bg-blue-600/10 border-blue-500 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
                                isReadOnlyForm && "opacity-50 cursor-not-allowed"
                              )}
                            >
-                             <div className={cn("w-3 h-3 rounded-full border-2", isCheck ? "bg-indigo-500 border-indigo-400" : "border-slate-700")} />
+                             <div className={cn("w-3 h-3 rounded-full border-2", isCheck ? "bg-blue-500 border-blue-400" : "border-slate-700")} />
                              <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Check Settlement</span>
                            </button>
                          </div>
@@ -1324,7 +1403,7 @@ export default function CollectionModule() {
                                value={checkNumber}
                                disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckNumber(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                                placeholder="Enter No..."
                              />
                            </div>
@@ -1335,7 +1414,7 @@ export default function CollectionModule() {
                                value={checkDate}
                                disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckDate(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                              />
                            </div>
                            <div className="col-span-2 space-y-1">
@@ -1345,7 +1424,7 @@ export default function CollectionModule() {
                                value={checkPayee}
                                disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckPayee(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-indigo-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                                placeholder="Payee Name..."
                              />
                            </div>
@@ -1402,7 +1481,7 @@ export default function CollectionModule() {
                         "px-8 h-8 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all shadow-xl font-black",
                         isSubmitting 
                           ? "bg-slate-800 text-slate-500 cursor-not-allowed" 
-                          : "bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30"
+                          : "bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30"
                       )}
                     >
                       {isSubmitting ? "Posting..." : "Post Payment Record"}
@@ -1461,7 +1540,7 @@ export default function CollectionModule() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Enter O.R. Number, Tax Declaration Number (TDN), or Payer's Name..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none transition-all font-sans"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-600 focus:border-blue-500 outline-none transition-all font-sans"
                     autoFocus
                   />
                 </div>
@@ -1470,7 +1549,7 @@ export default function CollectionModule() {
               <div className="flex-1 overflow-y-auto p-5">
                 {isSearchLoading ? (
                   <div className="flex flex-col items-center justify-center py-20 gap-3">
-                    <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                     <p className="text-slate-500 text-xs font-medium font-sans animate-pulse">Searching ledger...</p>
                   </div>
                 ) : searchResults.length === 0 ? (
@@ -1484,16 +1563,18 @@ export default function CollectionModule() {
                         <tr>
                           <th className="px-4 py-3 text-[10px] tracking-widest uppercase">O.R. Number</th>
                           <th className="px-4 py-3 text-[10px] tracking-widest uppercase">Payer / Taxpayer</th>
+                          <th className="px-4 py-3 text-[10px] tracking-widest uppercase">Tax Declaration Num</th>
                           <th className="px-4 py-3 text-[10px] tracking-widest uppercase">Years Paid</th>
                           <th className="px-4 py-3 text-[10px] tracking-widest uppercase text-right">Total Amount</th>
-                          <th className="px-4 py-3 text-[10px] tracking-widest uppercase text-center">Action</th>
+                          <th className="px-4 py-3 text-[10px] tracking-widest uppercase text-center">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-850 text-slate-300">
                         {searchResults.map((p) => (
                           <tr key={p.id} className="hover:bg-slate-850/40 transition-colors font-medium">
-                            <td className="px-4 py-3 font-mono font-bold text-indigo-400">{p.orNumber}</td>
+                            <td className="px-4 py-3 font-mono font-bold text-blue-400">{p.orNumber}</td>
                             <td className="px-4 py-3 font-semibold text-slate-200">{p.payerName || "—"}</td>
+                            <td className="px-4 py-3 text-slate-400 font-mono text-xs">{p.tdNumber}</td>
                             <td className="px-4 py-3 text-slate-400">
                               {p.years?.join(", ") || p.taxYear}
                             </td>
@@ -1501,13 +1582,15 @@ export default function CollectionModule() {
                               ₱{p.totalAmount ? p.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (p.amountPaid || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleSelectReceipt(p)}
-                                className="px-3 py-1 bg-indigo-600/15 text-indigo-400 hover:bg-indigo-600 hover:text-white border border-indigo-500/20 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all font-sans cursor-pointer"
-                              >
-                                View Record
-                              </button>
+                              <div className="table-actions">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectReceipt(p)}
+                                  className="btn-action-primary"
+                                >
+                                  View Record
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1619,6 +1702,10 @@ export default function CollectionModule() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isMigrating && (
+        <PaymentMigrator onClose={() => setIsMigrating(false)} />
+      )}
 
       <ConfirmDialog
         isOpen={errorDialog.isOpen}

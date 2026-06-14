@@ -158,8 +158,8 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
       return <ArrowUpDown className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 transition ml-1" />;
     }
     return sortOrder === "asc" 
-      ? <ArrowUp className="w-3.5 h-3.5 text-indigo-400 ml-1" />
-      : <ArrowDown className="w-3.5 h-3.5 text-indigo-400 ml-1" />;
+      ? <ArrowUp className="w-3.5 h-3.5 text-blue-400 ml-1" />
+      : <ArrowDown className="w-3.5 h-3.5 text-blue-400 ml-1" />;
   };
 
   return (
@@ -174,13 +174,13 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
         {/* Header */}
         <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center border border-indigo-500/25">
-              <History className="w-6 h-6 text-indigo-400" />
+            <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center border border-blue-500/25">
+              <History className="w-6 h-6 text-blue-400" />
             </div>
             <div>
               <h3 className="text-lg font-black text-white uppercase tracking-tight">Transaction Ledger History</h3>
               <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
-                Complete payment timeline for T.D. No: <span className="font-mono text-indigo-400 font-black">{property.tdNumber}</span>
+                Complete payment timeline for T.D. No: <span className="font-mono text-blue-400 font-black">{property.tdNumber}</span>
               </p>
             </div>
           </div>
@@ -209,7 +209,7 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
           </div>
           <div className="space-y-1">
             <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Classification / Kind</span>
-            <span className="text-xs font-mono font-bold text-indigo-400 block uppercase tracking-wide">{property.classification}</span>
+            <span className="text-xs font-mono font-bold text-blue-400 block uppercase tracking-wide">{property.classification}</span>
           </div>
         </div>
 
@@ -252,7 +252,7 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
               <input 
                 type="text" 
                 placeholder="Search by O.R. / Payer / Year..." 
-                className="w-full pl-10 pr-4 py-2 text-xs border border-slate-800 rounded-xl bg-slate-950 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium"
+                className="w-full pl-10 pr-4 py-2 text-xs border border-slate-800 rounded-xl bg-slate-950 text-slate-300 focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
               />
@@ -267,7 +267,7 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
                   className={cn(
                     "flex-1 md:flex-initial px-4 py-1.5 text-[9px] font-black uppercase tracking-wider rounded-lg transition-all",
                     stateFilter === filter
-                      ? "bg-indigo-600 text-white shadow-lg"
+                      ? "bg-blue-600 text-white shadow-lg"
                       : "text-slate-400 hover:text-slate-200"
                   )}
                 >
@@ -327,7 +327,7 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
                     </th>
                     <th 
                       onClick={() => handleSort("amountPaid")}
-                      className="px-5 py-3 text-[9px] font-black text-indigo-400 uppercase tracking-widest cursor-pointer hover:bg-slate-900 transition group select-none text-right"
+                      className="px-5 py-3 text-[9px] font-black text-blue-400 uppercase tracking-widest cursor-pointer hover:bg-slate-900 transition group select-none text-right"
                     >
                       <div className="flex items-center justify-end">
                         Sum Settled
@@ -350,7 +350,7 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
                     <tr>
                       <td colSpan={8} className="px-5 py-16 text-center text-slate-500">
                         <div className="flex justify-center items-center gap-2">
-                          <History className="w-4 h-4 text-indigo-400 animate-spin" />
+                          <History className="w-4 h-4 text-blue-400 animate-spin" />
                           <span className="font-sans font-medium text-slate-400 uppercase tracking-widest text-[10px]">Retrieving Receipt Timeline...</span>
                         </div>
                       </td>
@@ -389,7 +389,7 @@ export const TransactionHistoryModal: React.FC<TransactionHistoryModalProps> = (
                             day: "numeric"
                           }) : "---"}
                         </td>
-                        <td className="px-5 py-3.5 text-center font-bold text-slate-300 text-xs text-indigo-400/90 font-mono">
+                        <td className="px-5 py-3.5 text-center font-bold text-slate-300 text-xs text-blue-400/90 font-mono">
                           {payment.taxYear}
                         </td>
                         <td className="px-5 py-3.5 font-sans font-medium text-slate-300 truncate max-w-[150px]">

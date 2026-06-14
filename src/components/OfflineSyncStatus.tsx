@@ -80,18 +80,18 @@ export default function OfflineSyncStatus() {
           isOffline 
             ? "bg-amber-500/15 border-amber-500/30 text-amber-400 hover:bg-amber-500/25"
             : queue.length > 0
-              ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/25"
+              ? "bg-blue-500/15 border-blue-500/30 text-blue-400 hover:bg-blue-500/25"
               : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
         )}
       >
         <span className="relative flex h-2 w-2">
           <span className={cn(
             "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-            isOffline ? "bg-amber-400" : queue.length > 0 ? "bg-indigo-400" : "bg-emerald-400"
+            isOffline ? "bg-amber-400" : queue.length > 0 ? "bg-blue-400" : "bg-emerald-400"
           )}></span>
           <span className={cn(
             "relative inline-flex rounded-full h-2 w-2",
-            isOffline ? "bg-amber-500" : queue.length > 0 ? "bg-indigo-500" : "bg-emerald-500"
+            isOffline ? "bg-amber-500" : queue.length > 0 ? "bg-blue-500" : "bg-emerald-500"
           )}></span>
         </span>
 
@@ -129,11 +129,11 @@ export default function OfflineSyncStatus() {
               className="absolute right-0 mt-3 w-80 bg-slate-900/95 backdrop-blur-md border border-slate-800 rounded-3xl p-5 shadow-2xl z-50 overflow-hidden"
             >
               {/* Background Glow */}
-              <div className="absolute -top-12 -right-12 w-24 h-24 bg-indigo-500/15 blur-2xl rounded-full pointer-events-none" />
+              <div className="absolute -top-12 -right-12 w-24 h-24 bg-blue-500/15 blur-2xl rounded-full pointer-events-none" />
               
               <div className="flex justify-between items-center pb-3 border-b border-slate-800/80 mb-4">
                 <div className="flex items-center gap-2">
-                  <Database className="w-4 h-4 text-indigo-400" />
+                  <Database className="w-4 h-4 text-blue-400" />
                   <span className="text-sm font-bold text-white tracking-tight">Offline Sync Manager</span>
                 </div>
                 <div className={cn(
@@ -172,8 +172,8 @@ export default function OfflineSyncStatus() {
                     isOffline
                       ? "bg-slate-800/60 border-slate-800 text-slate-500 cursor-not-allowed"
                       : isSyncing
-                        ? "bg-indigo-600/20 border-indigo-500/30 text-indigo-300"
-                        : "bg-indigo-600 hover:bg-indigo-500 border-indigo-500 text-white hover:shadow-indigo-500/10"
+                        ? "bg-blue-600/20 border-blue-500/30 text-blue-300"
+                        : "bg-blue-600 hover:bg-blue-500 border-blue-500 text-white hover:shadow-blue-500/10"
                   )}
                 >
                   <RefreshCw className={cn("w-4 h-4", isSyncing && "animate-spin")} />
@@ -232,7 +232,7 @@ export default function OfflineSyncStatus() {
 
                         <div>
                           {task.status === 'syncing' ? (
-                            <span className="text-indigo-400 flex items-center gap-1">
+                            <span className="text-blue-400 flex items-center gap-1">
                               <RefreshCw className="w-2.5 h-2.5 animate-spin" />
                               Syncing
                             </span>
