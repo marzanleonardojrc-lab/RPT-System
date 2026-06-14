@@ -260,14 +260,12 @@ const Login: React.FC = () => {
                 </div>
               </div>
 
-              <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight leading-none mb-6">
-                Web-Based <br className="hidden md:block"/>
-                <span className="text-blue-400">Real Property</span> <br />
-                Tax System
+              <h1 className="text-3xl md:text-[2.2rem] font-black text-white tracking-tight leading-[1.15] mb-6">
+                Web-Based <span className="text-blue-400">Real Property</span> Tax Collection and Digital Ledger System
               </h1>
 
               <p className="text-slate-400 text-xs md:text-sm leading-relaxed max-w-md mb-8">
-                Access official administrative modules, register secure resident taxpayer accounts, or complete read-only financial ledger audits securely.
+                Modernizing transaction recording and records management for LGU-Dipaculao.
               </p>
             </div>
 
@@ -293,9 +291,10 @@ const Login: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-8 pt-6 border-t border-slate-800/50 flex items-center justify-between font-mono text-[9px] text-slate-600 uppercase">
-              <span>Secure Connection: AES-GCM</span>
-              <span>Dipaculao Finance Node</span>
+            <div className="mt-8 pt-6 border-t border-slate-800/50 flex flex-col sm:flex-row items-center justify-between font-mono text-[9.5px] text-slate-500 gap-2 uppercase tracking-wider">
+              <span>Presented by <strong className="text-slate-300 font-bold">Leonardo C. Marzan, Jr.</strong></span>
+              <span className="hidden sm:inline text-slate-800">|</span>
+              <span className="text-slate-450 text-center sm:text-right">© 2026 Master in Public Administration Capstone Project</span>
             </div>
           </div>
 
