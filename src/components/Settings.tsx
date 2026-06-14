@@ -29,7 +29,7 @@ import { toISODateSafe } from "../lib/utils";
 const Settings: React.FC = () => {
   const { profile, updateUserName, updateUserUsername, updateUserPassword } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [activeSubTab, setActiveSubTab] = useState<"active" | "pending" | "provision" | "maintenance">("active");
+  const [activeSubTab, setActiveSubTab] = useState<"active" | "pending" | "provision">("active");
   
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     return (localStorage.getItem("theme") as "dark" | "light") || "dark";
@@ -332,13 +332,6 @@ const Settings: React.FC = () => {
               <UserPlus className="w-3.5 h-3.5" />
               Provision Resident
             </button>
-            <button 
-              onClick={() => setActiveSubTab("maintenance")}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeSubTab === "maintenance" ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white"}`}
-            >
-              <Shield className="w-3.5 h-3.5" />
-              Maintenance
-            </button>
           </div>
         </div>
       </div>
@@ -381,106 +374,14 @@ const Settings: React.FC = () => {
       </div>
 
       <AnimatePresence mode="wait">
-        {activeSubTab === "maintenance" ? (
-          <motion.div
-            key="maintenance-panel"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.25 }}
-            className="bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-800 p-6 md:p-8 shadow-xl mt-6 max-w-4xl mx-auto space-y-6"
-          >
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-4 mb-6">
-              <Shield className="w-5 h-5 text-blue-400" />
-              <div>
-                <h3 className="text-lg font-bold text-white tracking-tight">Database Integrity Maintenance</h3>
-                <p className="text-slate-400 text-xs">Run specialized operations to ensure index linking and constraint validity.</p>
-              </div>
-            </div>
-
-            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
-              <h4 className="text-sm font-bold text-white mb-2">Cleanup Orphan Records</h4>
-              <p className="text-xs text-slate-400 mb-4">
-                Removes payment transactions (O.R. numbers) and delinquencies that are incorrectly attached to a property that has been permanently deleted from the registry. Running this frees up those Official Receipts for reuse.
-              </p>
-              
-              <button
-                onClick={async () => {
-                  try {
-                    setConfirmDialog({
-                      isOpen: true,
-                      title: "Purge Orphan Records?",
-                      message: "This will run a database scan. Any payments or delinquencies whose parent Property ID no longer exists will be permenantly removed from Firebase. Proceed?",
-                      type: "warning",
-                      onConfirm: async () => {
-                        const batch = writeBatch(db);
-                        let orphanCount = 0;
-                        const propsQuery = await getDocs(collection(db, "properties"));
-                        const validIds = new Set(propsQuery.docs.map(doc => doc.id));
-                        
-                        const pmtsQuery = await getDocs(collection(db, "payments"));
-                        for (const docSnap of pmtsQuery.docs) {
-                          const data = docSnap.data();
-                          if (!validIds.has(data.propertyId)) {
-                            batch.delete(docSnap.ref);
-                            orphanCount++;
-                          }
-                        }
-                        
-                        const dlqQuery = await getDocs(collection(db, "delinquencies"));
-                        for (const docSnap of dlqQuery.docs) {
-                          const data = docSnap.data();
-                          if (!validIds.has(data.propertyId)) {
-                            batch.delete(docSnap.ref);
-                            orphanCount++;
-                          }
-                        }
-
-                        if (orphanCount > 0) {
-                          await batch.commit();
-                          alert(`Success! Purged ${orphanCount} orphan records.`);
-                        } else {
-                          alert(`Database is perfectly clean. No orphan records found.`);
-                        }
-                      }
-                    });
-                  } catch (err: any) {
-                    alert(`Error: ${err.message}`);
-                  }
-                }}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-xs"
-              >
-                Scan and Purge
-              </button>
-            </div>
-            
-            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
-              <h4 className="text-sm font-bold text-white mb-2 ml-1">Example SQL Reference</h4>
-              <p className="text-xs text-slate-400 mb-4 ml-1">
-                If migrating this logic to MySQL in the future, the equivalent cleanup query would be:
-              </p>
-              <pre className="bg-slate-950 p-4 rounded-lg text-emerald-400 font-mono text-[11px] overflow-x-auto border border-slate-800">
-                {`-- Delete orphan payments
-DELETE p FROM payments p
-LEFT JOIN properties prop ON p.propertyId = prop.id
-WHERE prop.id IS NULL;
-
--- Delete orphan delinquencies
-DELETE d FROM delinquencies d
-LEFT JOIN properties prop ON d.propertyId = prop.id
-WHERE prop.id IS NULL;`}
-              </pre>
-            </div>
-            
-          </motion.div>
-        ) : activeSubTab === "provision" ? (
+        {activeSubTab === "provision" ? (
           <motion.div 
             key="provision-form"
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -15 }}
             transition={{ duration: 0.25 }}
-            className="bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-800 p-6 md:p-8 shadow-xl mt-6 max-w-4xl mx-auto"
+            className="bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-800 p-6 md:p-8 shadow-xl mt-6"
           >
             <div className="flex items-center gap-3 border-b border-slate-800 pb-4 mb-6">
               <UserPlus className="w-5 h-5 text-blue-400" />

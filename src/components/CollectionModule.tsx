@@ -1016,7 +1016,22 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
               <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
                 <div className="flex items-center gap-4">
                   <div className="p-3 bg-blue-500/10 rounded-2xl">
-                    <DollarSign className="w-6 h-6 text-blue-400" />
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-6 h-6 text-blue-400"
+                    >
+                      <path d="M6 18V4h6a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H6" />
+                      <path d="M3 8h12" />
+                      <path d="M3 12h12" />
+                    </svg>
                   </div>
                   <div>
                     <h3 className="text-xl font-black text-white uppercase tracking-tighter">Collection Registry</h3>
@@ -1028,14 +1043,16 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-[#0a0c10]">
-                {/* SECTION 1: TOP INFORMATION PANEL */}
-                <div className="space-y-4">
-                  <h4 className="text-xs font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-4">
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                    • I. RECEIPT DETAILS
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="flex-1 overflow-y-auto bg-[#0a0c10]">
+                {/* Balanced and standard padding with unified vertical flex spacing */}
+                <div className="p-6 flex flex-col gap-6 w-full box-border">
+                  {/* SECTION 1: TOP INFORMATION PANEL */}
+                  <div className="space-y-4 w-full box-border">
+                    <h4 className="text-xs font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-4">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                      • I. RECEIPT DETAILS
+                    </h4>
+                    <div className="w-full box-border" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
                     {/* O.R. NO */}
                     <div className="flex flex-col space-y-1.5">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">O.R. NO</label>
@@ -1118,14 +1135,6 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                       </div>
                     </div>
 
-                    {/* OWNER display - 2 columns on medium screens */}
-                    <div className="flex flex-col space-y-1.5 md:col-span-2">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">OWNER</label>
-                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
-                        {selectedProperty?.ownerName || "---"}
-                      </div>
-                    </div>
-
                     {/* TAX PAYER input */}
                     <div className="flex flex-col space-y-1.5">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">TAX PAYER</label>
@@ -1142,22 +1151,6 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                       />
                     </div>
 
-                    {/* OWNER ADDRESS display - 2 columns on medium screens */}
-                    <div className="flex flex-col space-y-1.5 md:col-span-2">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">OWNER ADDRESS</label>
-                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
-                        {selectedProperty?.ownerAddress || "---"}
-                      </div>
-                    </div>
-
-                    {/* LOCATION (display) */}
-                    <div className="flex flex-col space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">LOCATION</label>
-                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
-                        {selectedProperty ? `${selectedProperty.barangay}, ${selectedProperty.municipality}` : "---"}
-                      </div>
-                    </div>
-
                     {/* KIND (display) */}
                     <div className="flex flex-col space-y-1.5">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">KIND (Classification)</label>
@@ -1166,49 +1159,82 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                       </div>
                     </div>
 
-                    {/* LOT NO. (display) */}
-                    <div className="flex flex-col space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">LOT NO.</label>
-                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
-                        {selectedProperty?.lotNo || "---"}
+                    {/* OWNER, OWNER ADDRESS, LOCATION, LOT NO (2-Column Symmetrical Grid Layout) */}
+                    <div style={{ gridColumn: 'span 3', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }} className="w-full box-border">
+                      {/* OWNER */}
+                      <div className="flex flex-col space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">OWNER</label>
+                        <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                          {selectedProperty?.ownerName || "---"}
+                        </div>
+                      </div>
+
+                      {/* OWNER ADDRESS */}
+                      <div className="flex flex-col space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">OWNER ADDRESS</label>
+                        <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                          {selectedProperty?.ownerAddress || "---"}
+                        </div>
+                      </div>
+
+                      {/* LOCATION */}
+                      <div className="flex flex-col space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">LOCATION</label>
+                        <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                          {selectedProperty ? `${selectedProperty.barangay}, ${selectedProperty.municipality}` : "---"}
+                        </div>
+                      </div>
+
+                      {/* LOT NO. */}
+                      <div className="flex flex-col space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">LOT NO.</label>
+                        <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                          {selectedProperty?.lotNo || "---"}
+                        </div>
                       </div>
                     </div>
 
-                    {/* TREASURER */}
-                    <div className="flex flex-col space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">TREASURER</label>
-                      <input 
-                        type="text" 
-                        value={treasurer}
-                        onChange={e => setTreasurer(e.target.value)}
-                        disabled={isReadOnlyForm}
-                        className={cn(
-                          "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-xs",
-                          fieldErrors.treasurer ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
-                        )}
-                      />
-                    </div>
+                    {/* TREASURER & DEPUTY (Symmetrical Layout) */}
+                    <div style={{ gridColumn: 'span 3', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }} className="w-full box-border">
+                      {/* TREASURER */}
+                      <div className="flex flex-col space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">TREASURER</label>
+                        <input 
+                          type="text" 
+                          value={treasurer}
+                          onChange={e => setTreasurer(e.target.value)}
+                          disabled={isReadOnlyForm}
+                          className={cn(
+                            "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-xs",
+                            fieldErrors.treasurer ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
+                          )}
+                        />
+                      </div>
 
-                    {/* DEPUTY */}
-                    <div className="flex flex-col space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">DEPUTY</label>
-                      <input 
-                        type="text" 
-                        value={deputy}
-                        onChange={e => setDeputy(e.target.value)}
-                        disabled={isReadOnlyForm}
-                        className={cn(
-                          "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-xs",
-                          fieldErrors.deputy ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
-                        )}
-                      />
+                      {/* DEPUTY */}
+                      <div className="flex flex-col space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">DEPUTY</label>
+                        <input 
+                          type="text" 
+                          value={deputy}
+                          onChange={e => setDeputy(e.target.value)}
+                          disabled={isReadOnlyForm}
+                          className={cn(
+                            "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-xs",
+                            fieldErrors.deputy ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
+                          )}
+                        />
+                      </div>
                     </div>
 
                     {/* PAYMENT MODE CONTAINER */}
-                    <div className={cn(
-                      "md:col-span-3 p-5 bg-slate-950/40 border rounded-2xl flex flex-col relative group text-xs",
-                      fieldErrors.quarters ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800/80"
-                    )}>
+                    <div 
+                      className={cn(
+                        "p-5 bg-slate-950/40 border rounded-2xl flex flex-col relative group text-xs w-full box-border",
+                        fieldErrors.quarters ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800/80"
+                      )}
+                      style={{ gridColumn: 'span 3' }}
+                    >
                       <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 mb-3">
                         <label className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block font-sans">Payment Mode</label>
                         <label className={cn("flex items-center gap-2", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
@@ -1261,15 +1287,15 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                         </div>
                       </div>
                     </div>
+                  </div>
                 </div>
-              </div>
 
-              {/* SECTION 2: MIDDLE DATA TABLE */}
-              <div className="space-y-4 px-6 mb-2">
-                <h4 className="text-xs font-bold text-blue-500 uppercase tracking-[0.2em]">
-                  • II. ASSESSMENT BREAKDOWN
-                </h4>
-                <div className={cn("border rounded-2xl overflow-hidden shadow-xl bg-slate-950/20", fieldErrors.records ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800")}>
+                {/* SECTION 2: MIDDLE DATA TABLE */}
+                <div className="space-y-4 w-full box-border">
+                  <h4 className="text-xs font-bold text-blue-500 uppercase tracking-[0.2em]">
+                    • II. ASSESSMENT BREAKDOWN
+                  </h4>
+                <div className={cn("border rounded-2xl overflow-hidden shadow-xl bg-slate-950/20 w-full box-border", fieldErrors.records ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800")}>
                   <table className="w-full text-left text-[11px]">
                     <thead>
                       <tr className="bg-slate-950/50 border-b border-slate-800">
@@ -1360,16 +1386,16 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
               </div>
 
               {/* SECTION 3: BOTTOM PAYMENT DETAILS */}
-              <div className="space-y-4 px-6 pb-6 mt-6">
+              <div className="space-y-4 w-full box-border">
                 <h4 className="text-xs font-bold text-blue-500 uppercase tracking-[0.2em]">
                   • III. SETTLEMENT DETAILS
                 </h4>
 
-                <div className="mt-2 space-y-3">
+                <div className="mt-2 space-y-3 w-full box-border">
                   {/* 2-Column Payment Inputs Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch w-full box-border">
                     {/* Column 1: Tender & Change */}
-                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between h-full shadow-lg">
+                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between h-full shadow-lg w-full box-border">
                        <div className="space-y-4">
                          {/* Integrated Amount Due Display */}
                          <div className="flex justify-between items-start border-b border-slate-800 pb-3">
@@ -1410,7 +1436,7 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                     </div>
 
                     {/* Column 2: Settlement Method */}
-                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col h-full overflow-hidden">
+                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col h-full overflow-hidden w-full box-border">
                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block pl-1 border-b border-slate-800 pb-2 mb-4 w-full text-left">Settlement Method</label>
                        <div className="space-y-3 flex-1 flex flex-col">
                          <div className="flex gap-4">
@@ -1479,6 +1505,7 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                     </div>
                   </div>
                 </div>
+              </div>
               </div>
             </div>
 
