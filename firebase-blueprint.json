@@ -124,9 +124,24 @@
             "voidedAt": { "type": "string", "format": "date-time" }
           }
         },
+        "batch_id": { "type": "string" },
         "recordedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["delinquencyId", "propertyId", "orNumber", "amountPaid", "status", "recordedAt"]
+    },
+    "ImportBatch": {
+      "title": "Import Batch",
+      "description": "Records list of bulk imported payment batches.",
+      "type": "object",
+      "properties": {
+        "batch_id": { "type": "string" },
+        "filename": { "type": "string" },
+        "imported_by": { "type": "string" },
+        "record_count": { "type": "integer" },
+        "import_date": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Rolled Back"] }
+      },
+      "required": ["batch_id", "filename", "imported_by", "record_count", "import_date", "status"]
     },
     "TaxpayerRequest": {
       "title": "Taxpayer Request",
@@ -207,6 +222,10 @@
     "user_mappings": {
       "schema": "UserMapping",
       "description": "Identifier lookups."
+    },
+    "import_batches": {
+      "schema": "ImportBatch",
+      "description": "Ledger of bulk CSV upload events for data migration."
     }
   }
 }

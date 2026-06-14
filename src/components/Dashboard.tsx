@@ -196,14 +196,14 @@ const Dashboard: React.FC = () => {
             </span>
           </div>
 
-          <div className="flex-1">
+          <div className="flex-1 bg-[#0f172b] rounded-2xl">
             {activeChartTab === "collections" ? (
               <CollectionChart />
             ) : (
               <motion.div
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl relative overflow-hidden flex flex-col justify-between h-full"
+                className="p-8 bg-[#0f172b] border border-slate-800 rounded-2xl shadow-2xl relative overflow-hidden flex flex-col justify-between h-full"
               >
                 <div className="absolute top-0 right-0 p-8 opacity-5">
                    <TrendingUp className="w-32 h-32 text-blue-500" />

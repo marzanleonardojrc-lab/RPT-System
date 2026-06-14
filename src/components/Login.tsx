@@ -255,8 +255,8 @@ const Login: React.FC = () => {
                   <img src="/logo.png" alt="Dipaculao Logo" className="w-10 h-10 object-contain" referrerPolicy="no-referrer" />
                 </div>
                 <div>
-                  <h4 className="text-[10px] font-black tracking-[0.2em] text-blue-500 uppercase font-mono">Dipaculao Aurora</h4>
-                  <h2 className="text-sm font-bold text-slate-300 leading-none">Government RPT Network</h2>
+                  <h4 className="text-[11px] font-extrabold tracking-[0.18em] text-blue-400 uppercase font-mono">LGU-DIPACULAO, AURORA</h4>
+                  <h2 className="text-[13px] font-semibold text-slate-200 tracking-wide mt-1 leading-snug">Municipal Treasury Office RPT Portal</h2>
                 </div>
               </div>
 

@@ -3,6 +3,7 @@ import Papa from "papaparse";
 import { 
   collection, 
   addDoc, 
+  setDoc,
   serverTimestamp,
   db,
   handleFirestoreError,
@@ -106,6 +107,20 @@ export const PaymentMigrator: React.FC<ImporterProps> = ({ onClose }) => {
           let failed = 0;
           let cleared = 0;
 
+          // Create a new batch track document reference
+          const batchDocRef = doc(collection(db, "import_batches"));
+          const generatedBatchId = batchDocRef.id;
+
+          // Insert high-level tracking document matching schema
+          await setDoc(batchDocRef, {
+            batch_id: generatedBatchId,
+            filename: file.name,
+            imported_by: profile?.username || profile?.displayName || profile?.email || "System",
+            record_count: 0,
+            import_date: new Date().toISOString(),
+            status: "Active"
+          });
+
           // Process row by row
           for (let row of rows) {
             try {
@@ -147,10 +162,6 @@ export const PaymentMigrator: React.FC<ImporterProps> = ({ onClose }) => {
                   propertyId = pDoc.id;
                   assessedValue = pDoc.data().assessedValue || 0;
                   payerName = pDoc.data().ownerName || "MIGRATED_RECORD";
-                  
-                  // Also untag property if it has "status: 'Delinquent'" in the properties structure?
-                  // Our properties don't use a 'status' = 'Delinquent' column directly.
-                  // They rely on the delinquencies sub-collection/collection.
               }
 
               // 2. Resolve or Create Delinquency Record
@@ -209,6 +220,7 @@ export const PaymentMigrator: React.FC<ImporterProps> = ({ onClose }) => {
 
               // 3. Insert Payment
               const paymentData = {
+                batch_id: generatedBatchId,
                 propertyId: propertyId,
                 delinquencyId: delinquencyId,
                 taxYear: taxYear,
@@ -239,9 +251,14 @@ export const PaymentMigrator: React.FC<ImporterProps> = ({ onClose }) => {
             }
           }
 
+          // Update finalized counts on audit batch document
+          await updateDoc(batchDocRef, {
+            record_count: success
+          });
+
           setResults({ success, failed, total: rows.length, cleared });
           setStatus("success");
-          await logAudit("CREATE", "PaymentMigration", "batch", null, { count: success });
+          await logAudit("CREATE", "PaymentMigration", generatedBatchId, null, { count: success, file: file.name });
         } catch (err: any) {
           console.error("Migration process failed", err);
           setErrorMessage(err?.message || "An unexpected error occurred during CSV parsing.");

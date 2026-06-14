@@ -137,6 +137,7 @@ service cloud.firestore {
              (!('amountPaid' in data.keys()) || isNum(data.amountPaid)) &&
              (!('status' in data.keys()) || data.status in ['Active', 'Voided']) &&
              (!('recordedAt' in data.keys()) || isTime(data.recordedAt)) &&
+             (!('batch_id' in data.keys()) || data.batch_id == null || data.batch_id is string) &&
              // Ensure delinquency exists
              (resource == null ? exists(/databases/$(database)/documents/delinquencies/$(data.delinquencyId)) : true);
     }
@@ -158,6 +159,18 @@ service cloud.firestore {
              data.type in ['clearance', 'revision', 'transfer'] &&
              data.status in ['Submitted', 'Approved', 'Rejected', 'Pending'] &&
              isTime(data.createdAt);
+    }
+
+    function isValidImportBatch(data) {
+      let isCreate = resource == null;
+      let requiredFields = ['batch_id', 'filename', 'imported_by', 'record_count', 'import_date', 'status'];
+      return (isCreate ? data.keys().hasAll(requiredFields) : true) &&
+             (!('batch_id' in data.keys()) || data.batch_id is string) &&
+             (!('filename' in data.keys()) || data.filename is string) &&
+             (!('imported_by' in data.keys()) || data.imported_by is string) &&
+             (!('record_count' in data.keys()) || data.record_count is int) &&
+             (!('import_date' in data.keys()) || isTime(data.import_date)) &&
+             (!('status' in data.keys()) || data.status in ['Active', 'Rolled Back']);
     }
 
     // --- Collections ---
@@ -196,6 +209,13 @@ service cloud.firestore {
       allow update: if isValidId(paymentId) && (isAdmin() || (isEncoder() && isValidPayment(incoming()) &&
                     incoming().diff(existing()).affectedKeys().hasOnly(['status', 'voidMetadata', 'updatedAt'])));
       allow delete: if isAdmin() && isValidId(paymentId);
+    }
+
+    match /import_batches/{batchId} {
+      allow read: if isViewer();
+      allow create: if isEncoder() && isValidImportBatch(incoming()) && isValidId(batchId);
+      allow update: if isAdmin() && isValidImportBatch(incoming()) && isValidId(batchId);
+      allow delete: if isAdmin() && isValidId(batchId);
     }
 
     match /audit_logs/{logId} {

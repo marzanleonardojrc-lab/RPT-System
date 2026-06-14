@@ -42,6 +42,7 @@ import DelinquencyActions from "./DelinquencyActions";
 import { TransactionHistoryModal } from "./TransactionHistoryModal";
 
 import { PaymentMigrator } from "./PaymentMigrator";
+import { MigrationAuditLogModal } from "./MigrationAuditLogModal";
 
 export default function CollectionModule({ prefillProperty }: { prefillProperty?: Property | null }) {
   const { profile, isEncoder, isAdmin } = useAuth();
@@ -49,6 +50,7 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
   const [properties, setProperties] = useState<Property[]>([]);
   const [isPosting, setIsPosting] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
+  const [isViewingHistory, setIsViewingHistory] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedHistoryProperty, setSelectedHistoryProperty] = useState<Property | null>(null);
@@ -874,8 +876,15 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
         {isEncoder && (
           <div className="flex items-center gap-2">
             <button 
+              onClick={() => setIsViewingHistory(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-transparent border border-slate-700 text-slate-300 rounded-xl hover:bg-slate-800 transition font-bold text-xs uppercase tracking-wider"
+            >
+              <History className="w-4 h-4 text-slate-400" />
+              Import History
+            </button>
+            <button 
               onClick={() => setIsMigrating(true)}
-              className="flex items-center gap-2 px-6 py-2.5 bg-transparent border border-blue-500/50 text-blue-400 rounded-xl hover:bg-blue-500/10 hover:border-blue-500 transition font-bold text-xs uppercase tracking-wider"
+              className="flex items-center gap-2 px-5 py-2.5 bg-transparent border border-blue-500/50 text-blue-400 rounded-xl hover:bg-blue-500/10 hover:border-blue-500 transition font-bold text-xs uppercase tracking-wider"
             >
               <Upload className="w-4 h-4" />
               Migrate Data
@@ -1019,137 +1028,68 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#0a0c10]">
+              <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-[#0a0c10]">
                 {/* SECTION 1: TOP INFORMATION PANEL */}
-                <div className="grid grid-cols-2 grid-rows-7 gap-x-12 gap-y-2 items-start">
-                  
-                  {/* ROW 1 */}
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">O.R. NO:</label>
-                    <input 
-                      type="text" 
-                      value={orNumber}
-                      onChange={e => setOrNumber(e.target.value)}
-                      disabled={isSubmitting || isReadOnlyForm}
-                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white font-mono text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.orNumber ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
-                      placeholder="Receipt Number..."
-                    />
-                  </div>
-                  <div className={cn("row-span-2 h-[72px] p-2 bg-slate-950 border rounded-lg flex flex-col relative group", fieldErrors.quarters ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800")}>
-                     <div className="flex items-center justify-between border-b border-slate-800/50 pb-0.5 mb-1.5">
-                       <label className="text-[8px] font-bold text-blue-400 uppercase tracking-widest block">Payment Mode</label>
-                       <label className={cn("flex items-center gap-1.5", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
-                         <input 
-                           type="checkbox" 
-                           checked={isAdvance}
-                           onChange={e => setIsAdvance(e.target.checked)}
-                           disabled={isSubmitting || isReadOnlyForm}
-                           className="w-2.5 h-2.5 accent-emerald-500 rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                         />
-                         <span className={cn("text-[7px] font-black uppercase tracking-tighter transition-colors", isAdvance ? "text-emerald-400" : "text-slate-600")}>Advance Payment (20%)</span>
-                       </label>
-                     </div>
-                     <div className="grid grid-cols-3 grid-rows-2 gap-x-4 gap-y-1.5 flex-1 items-center">
-                       {/* ROW 1 */}
-                       <label className={cn("flex items-center gap-2 group", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
-                         <input type="radio" checked={paymentMode === "Full"} onChange={() => setPaymentMode("Full")} disabled={isSubmitting || isReadOnlyForm} className="w-3 h-3 accent-blue-500 disabled:opacity-50" />
-                         <span className="text-[9px] font-bold text-slate-300 group-hover:text-white transition-colors">Full</span>
-                       </label>
-                       <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
-                         <input 
-                           type="checkbox" 
-                           checked={quarters.includes("1st Qtr")}
-                           disabled={paymentMode === "Full" || isReadOnlyForm}
-                           onChange={e => handleQuarterToggle("1st Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-blue-500 disabled:opacity-50" 
-                         />
-                         <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">1st quarter</span>
-                       </label>
-                       <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
-                         <input 
-                           type="checkbox" 
-                           checked={quarters.includes("3rd Qtr")}
-                           disabled={paymentMode === "Full" || isReadOnlyForm}
-                           onChange={e => handleQuarterToggle("3rd Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-blue-500 disabled:opacity-50" 
-                         />
-                         <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">3rd quarter</span>
-                       </label>
-
-                       {/* ROW 2 */}
-                       <label className={cn("flex items-center gap-2 group", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
-                         <input type="radio" checked={paymentMode === "Installment"} onChange={() => { setPaymentMode("Installment"); setQuarters(["1st Qtr", "2nd Qtr", "3rd Qtr", "4th Qtr"]); }} disabled={isSubmitting || isReadOnlyForm} className="w-3 h-3 accent-blue-500 disabled:opacity-50" />
-                         <span className="text-[9px] font-bold text-slate-300 group-hover:text-white transition-colors">Installment</span>
-                       </label>
-                       <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
-                         <input 
-                           type="checkbox" 
-                           checked={quarters.includes("2nd Qtr")}
-                           disabled={paymentMode === "Full" || isReadOnlyForm}
-                           onChange={e => handleQuarterToggle("2nd Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-blue-500 disabled:opacity-50" 
-                         />
-                         <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">2nd quarter</span>
-                       </label>
-                       <label className={cn("flex items-center gap-2 transition-all", (paymentMode === "Full" || isReadOnlyForm) ? "opacity-20 cursor-not-allowed" : "cursor-pointer group")}>
-                         <input 
-                           type="checkbox" 
-                           checked={quarters.includes("4th Qtr")}
-                           disabled={paymentMode === "Full" || isReadOnlyForm}
-                           onChange={e => handleQuarterToggle("4th Qtr", e.target.checked)}
-                           className="w-2.5 h-2.5 accent-blue-500 disabled:opacity-50" 
-                         />
-                         <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors whitespace-nowrap">4th quarter</span>
-                       </label>
-                     </div>
-                  </div>
-
-                  {/* ROW 2 */}
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">O.R. DATE:</label>
-                    <input 
-                      type="date" 
-                      value={orDate}
-                      onChange={e => setOrDate(e.target.value)}
-                      disabled={isReadOnlyForm}
-                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white font-mono text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.orDate ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
-                    />
-                  </div>
-
-
-                  {/* ROW 3 */}
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">ARP/Tax DEC. NO.:</label>
-                    <div className="col-span-2 h-8 flex items-center justify-between px-3 bg-slate-950/50 border border-slate-800 rounded-lg text-slate-400 text-xs italic truncate">
-                      <span>{selectedProperty?.tdNumber || "No property..."}</span>
-                      {selectedProperty && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedHistoryProperty(selectedProperty)}
-                          className="px-2 py-0.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded text-[9px] border border-blue-500/20 hover:border-blue-500/30 transition-all font-black uppercase tracking-wider cursor-pointer"
-                        >
-                          Show History
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 items-center h-8 relative">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest text-right whitespace-nowrap">TD No / ARP No:</label>
-                    <div className="col-span-2 relative">
+                <div className="space-y-4">
+                  <h4 className="text-xs font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-4">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                    • I. RECEIPT DETAILS
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* O.R. NO */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">O.R. NO</label>
                       <input 
                         type="text" 
-                        value={propSearch}
-                        onChange={e => setPropSearch(e.target.value)}
-                        disabled={isReadOnlyForm}
-                        className={cn("w-full h-8 bg-slate-950 border rounded-lg pl-3 pr-8 text-white text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.property ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
-                        placeholder="Search property..."
+                        value={orNumber}
+                        onChange={e => setOrNumber(e.target.value)}
+                        disabled={isSubmitting || isReadOnlyForm}
+                        className={cn(
+                          "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all font-mono text-xs",
+                          fieldErrors.orNumber ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
+                        )}
+                        placeholder="Receipt Number..."
                       />
-                      <Search className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    </div>
+
+                    {/* O.R. DATE */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">O.R. DATE</label>
+                      <input 
+                        type="date" 
+                        value={orDate}
+                        onChange={e => setOrDate(e.target.value)}
+                        disabled={isReadOnlyForm}
+                        className={cn(
+                          "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all [color-scheme:dark] text-xs",
+                          fieldErrors.orDate ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
+                        )}
+                      />
+                    </div>
+
+                    {/* TD No / ARP No (Search Input) */}
+                    <div className="flex flex-col space-y-1.5 relative">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Search Property (TD/ARP)</label>
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          value={propSearch}
+                          onChange={e => setPropSearch(e.target.value)}
+                          disabled={isReadOnlyForm}
+                          className={cn(
+                            "w-full h-10 pl-4 pr-10 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-xs",
+                            fieldErrors.property ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
+                          )}
+                          placeholder="Search property..."
+                        />
+                        <Search className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                      </div>
                       {propSearchResults.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-[110] overflow-hidden">
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[110] overflow-hidden">
                           {propSearchResults.map(p => (
                             <button 
                               key={p.id}
+                              type="button"
                               onClick={() => handleSelectProperty(p)}
                               className="w-full p-2 text-left hover:bg-blue-500/10 border-b border-slate-800 last:border-0 transition-colors"
                             >
@@ -1160,79 +1100,176 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                         </div>
                       )}
                     </div>
-                  </div>
 
-                  {/* ROW 4 */}
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">LOCATION:</label>
-                    <div className="col-span-2 h-8 flex items-center px-3 bg-slate-950/50 border border-slate-800 rounded-lg text-slate-400 text-xs italic truncate">
-                      {selectedProperty ? `${selectedProperty.barangay}, ${selectedProperty.municipality}` : "---"}
+                    {/* ARP/Tax DEC. NO. display */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">ARP/Tax DEC. NO.</label>
+                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-slate-300 text-xs truncate">
+                        <span className="font-mono">{selectedProperty?.tdNumber || "No property selected"}</span>
+                        {selectedProperty && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedHistoryProperty(selectedProperty)}
+                            className="px-2.5 py-1 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded-lg text-[9px] border border-blue-500/20 hover:border-blue-500/30 transition-all font-black uppercase tracking-wider cursor-pointer"
+                          >
+                            Show History
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest text-right">KIND:</label>
-                    <div className="col-span-2 h-8 flex items-center px-3 bg-slate-950/50 border border-slate-800 rounded-lg text-slate-400 text-xs italic truncate">
-                      {selectedProperty?.classification || "---"}
-                    </div>
-                  </div>
 
-                  {/* ROW 5 */}
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">OWNER:</label>
-                    <div className="col-span-2 h-8 flex items-center px-3 bg-slate-950/50 border border-slate-800 rounded-lg text-slate-400 text-xs italic truncate">
-                      {selectedProperty?.ownerName || "---"}
+                    {/* OWNER display - 2 columns on medium screens */}
+                    <div className="flex flex-col space-y-1.5 md:col-span-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">OWNER</label>
+                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                        {selectedProperty?.ownerName || "---"}
+                      </div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest text-right">OWNER ADDRESS:</label>
-                    <div className="col-span-2 h-8 flex items-center px-3 bg-slate-950/50 border border-slate-800 rounded-lg text-slate-400 text-xs italic truncate">
-                      {selectedProperty?.ownerAddress || "---"}
-                    </div>
-                  </div>
 
-                  {/* ROW 6 */}
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">TAX PAYER:</label>
-                    <input 
-                      type="text" 
-                      value={taxPayer}
-                      onChange={e => setTaxPayer(e.target.value)}
-                      disabled={isReadOnlyForm}
-                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.taxPayer ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest text-right">LOT NO.:</label>
-                    <div className="col-span-2 h-8 flex items-center px-3 bg-slate-950/50 border border-slate-800 rounded-lg text-slate-400 text-xs italic truncate">
-                      {selectedProperty?.lotNo || "---"}
+                    {/* TAX PAYER input */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">TAX PAYER</label>
+                      <input 
+                        type="text" 
+                        value={taxPayer}
+                        onChange={e => setTaxPayer(e.target.value)}
+                        disabled={isReadOnlyForm}
+                        className={cn(
+                          "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-xs",
+                          fieldErrors.taxPayer ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
+                        )}
+                        placeholder="Name of payer..."
+                      />
                     </div>
-                  </div>
 
-                  {/* ROW 7 */}
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">TREASURER:</label>
-                    <input 
-                      type="text" 
-                      value={treasurer}
-                      onChange={e => setTreasurer(e.target.value)}
-                      disabled={isReadOnlyForm}
-                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.treasurer ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 items-center h-8">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest text-right">DEPUTY:</label>
-                    <input 
-                      type="text" 
-                      value={deputy}
-                      onChange={e => setDeputy(e.target.value)}
-                      disabled={isReadOnlyForm}
-                      className={cn("col-span-2 h-8 bg-slate-950 border rounded-lg px-3 text-white text-xs outline-none disabled:opacity-70 disabled:cursor-not-allowed", fieldErrors.deputy ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800 focus:ring-1 focus:ring-blue-500")}
-                    />
-                  </div>
+                    {/* OWNER ADDRESS display - 2 columns on medium screens */}
+                    <div className="flex flex-col space-y-1.5 md:col-span-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">OWNER ADDRESS</label>
+                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                        {selectedProperty?.ownerAddress || "---"}
+                      </div>
+                    </div>
+
+                    {/* LOCATION (display) */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">LOCATION</label>
+                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                        {selectedProperty ? `${selectedProperty.barangay}, ${selectedProperty.municipality}` : "---"}
+                      </div>
+                    </div>
+
+                    {/* KIND (display) */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">KIND (Classification)</label>
+                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                        {selectedProperty?.classification || "---"}
+                      </div>
+                    </div>
+
+                    {/* LOT NO. (display) */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">LOT NO.</label>
+                      <div className="w-full h-10 px-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center text-slate-300 text-xs truncate">
+                        {selectedProperty?.lotNo || "---"}
+                      </div>
+                    </div>
+
+                    {/* TREASURER */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">TREASURER</label>
+                      <input 
+                        type="text" 
+                        value={treasurer}
+                        onChange={e => setTreasurer(e.target.value)}
+                        disabled={isReadOnlyForm}
+                        className={cn(
+                          "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-xs",
+                          fieldErrors.treasurer ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
+                        )}
+                      />
+                    </div>
+
+                    {/* DEPUTY */}
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">DEPUTY</label>
+                      <input 
+                        type="text" 
+                        value={deputy}
+                        onChange={e => setDeputy(e.target.value)}
+                        disabled={isReadOnlyForm}
+                        className={cn(
+                          "w-full h-10 px-4 bg-slate-950 border rounded-xl text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-xs",
+                          fieldErrors.deputy ? "border-red-500/50 bg-red-500/5" : "border-slate-800"
+                        )}
+                      />
+                    </div>
+
+                    {/* PAYMENT MODE CONTAINER */}
+                    <div className={cn(
+                      "md:col-span-3 p-5 bg-slate-950/40 border rounded-2xl flex flex-col relative group text-xs",
+                      fieldErrors.quarters ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800/80"
+                    )}>
+                      <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 mb-3">
+                        <label className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block font-sans">Payment Mode</label>
+                        <label className={cn("flex items-center gap-2", isReadOnlyForm ? "cursor-not-allowed" : "cursor-pointer")}>
+                          <input 
+                            type="checkbox" 
+                            checked={isAdvance}
+                            onChange={e => setIsAdvance(e.target.checked)}
+                            disabled={isSubmitting || isReadOnlyForm}
+                            className="w-3.5 h-3.5 accent-emerald-500 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                          <span className={cn("text-[9px] font-black uppercase tracking-wider transition-colors", isAdvance ? "text-emerald-400" : "text-slate-500")}>Advance Payment (20%)</span>
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-y-4 md:gap-x-6 items-center">
+                        <label className={cn("flex items-center gap-2.5 cursor-pointer group", isReadOnlyForm && "cursor-not-allowed")}>
+                          <input 
+                            type="radio" 
+                            checked={paymentMode === "Full"} 
+                            onChange={() => setPaymentMode("Full")} 
+                            disabled={isSubmitting || isReadOnlyForm} 
+                            className="w-4 h-4 accent-blue-500 disabled:opacity-50" 
+                          />
+                          <span className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors">Full Annual Payment</span>
+                        </label>
+
+                        <label className={cn("flex items-center gap-2.5 cursor-pointer group", isReadOnlyForm && "cursor-not-allowed")}>
+                          <input 
+                            type="radio" 
+                            checked={paymentMode === "Installment"} 
+                            onChange={() => { setPaymentMode("Installment"); setQuarters(["1st Qtr", "2nd Qtr", "3rd Qtr", "4th Qtr"]); }} 
+                            disabled={isSubmitting || isReadOnlyForm} 
+                            className="w-4 h-4 accent-blue-500 disabled:opacity-50" 
+                          />
+                          <span className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors">Installment (Quarterly)</span>
+                        </label>
+
+                        <div className={cn("grid grid-cols-2 gap-2 transition-all", paymentMode === "Full" ? "opacity-20 pointer-events-none" : "opacity-100")}>
+                          {["1st Qtr", "2nd Qtr", "3rd Qtr", "4th Qtr"].map((qtr) => (
+                            <label key={qtr} className={cn("flex items-center gap-2 cursor-pointer group", isReadOnlyForm && "cursor-not-allowed")}>
+                              <input 
+                                type="checkbox" 
+                                checked={quarters.includes(qtr)}
+                                disabled={paymentMode === "Full" || isReadOnlyForm}
+                                onChange={e => handleQuarterToggle(qtr, e.target.checked)}
+                                className="w-3.5 h-3.5 accent-blue-500 disabled:opacity-50" 
+                              />
+                              <span className="text-[10px] font-bold text-slate-400 group-hover:text-slate-200 transition-colors uppercase tracking-wider">{qtr}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                 </div>
+              </div>
 
-                {/* SECTION 2: MIDDLE DATA TABLE */}
-                <div className={cn("border rounded-lg overflow-hidden shadow-xl bg-slate-950/20", fieldErrors.records ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800")}>
+              {/* SECTION 2: MIDDLE DATA TABLE */}
+              <div className="space-y-4 px-6 mb-2">
+                <h4 className="text-xs font-bold text-blue-500 uppercase tracking-[0.2em]">
+                  • II. ASSESSMENT BREAKDOWN
+                </h4>
+                <div className={cn("border rounded-2xl overflow-hidden shadow-xl bg-slate-950/20", fieldErrors.records ? "border-red-500 ring-1 ring-red-500/50" : "border-slate-800")}>
                   <table className="w-full text-left text-[11px]">
                     <thead>
                       <tr className="bg-slate-950/50 border-b border-slate-800">
@@ -1320,75 +1357,84 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                     </tfoot>
                   </table>
                 </div>
+              </div>
 
-                {/* SECTION 3: BOTTOM PAYMENT DETAILS */}
+              {/* SECTION 3: BOTTOM PAYMENT DETAILS */}
+              <div className="space-y-4 px-6 pb-6 mt-6">
+                <h4 className="text-xs font-bold text-blue-500 uppercase tracking-[0.2em]">
+                  • III. SETTLEMENT DETAILS
+                </h4>
+
                 <div className="mt-2 space-y-3">
                   {/* 2-Column Payment Inputs Grid */}
-                  <div className="grid grid-cols-2 gap-3 items-stretch">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
                     {/* Column 1: Tender & Change */}
-                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-col justify-between h-full shadow-lg">
+                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between h-full shadow-lg">
                        <div className="space-y-4">
                          {/* Integrated Amount Due Display */}
                          <div className="flex justify-between items-start border-b border-slate-800 pb-3">
                             <div>
-                               <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Liability amount</span>
-                               <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Total Assessment Due</span>
+                               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block pl-1">Liability Amount</span>
+                               <span className="text-[11px] font-black text-blue-400 uppercase tracking-widest block pl-1">Total Assessment Due</span>
                             </div>
                             <span className="text-xl font-black text-white">{formatCurrency(formTotals.total)}</span>
                          </div>
 
-                         <div className="space-y-1">
+                         <div className="flex flex-col space-y-1.5">
                            <div className="flex justify-between items-center">
-                             <label className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">Cash Tendered</label>
+                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Cash Tendered</label>
                              {fieldErrors.cashTendered && <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest">{fieldErrors.cashTendered}</span>}
                            </div>
                            <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 font-bold text-sm">₱</span>
+                              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 font-bold text-sm">₱</span>
                               <input 
                                 type="number" 
                                 value={cashTendered || ""}
                                 onChange={e => setCashTendered(parseFloat(e.target.value) || 0)}
                                 disabled={isReadOnlyForm}
-                                className={cn("w-full h-10 bg-slate-950 border rounded-lg pl-7 pr-3 text-lg font-black text-white outline-none transition-all shadow-lg shadow-blue-600/5 transition-all disabled:opacity-75 disabled:cursor-not-allowed", fieldErrors.cashTendered ? "border-red-500 ring-1 ring-red-500/50" : "border-blue-500/30 focus:border-blue-500")}
+                                className={cn(
+                                  "w-full h-11 bg-slate-950 border rounded-xl pl-9 pr-4 text-base font-black text-white outline-none transition-all disabled:opacity-75 disabled:cursor-not-allowed",
+                                  fieldErrors.cashTendered ? "border-red-500/50 bg-red-500/5" : "border-slate-800 focus:ring-2 focus:ring-blue-500"
+                                )}
                                 placeholder="0.00"
                               />
                            </div>
                          </div>
                        </div>
-                       <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-lg border border-slate-800 mt-4">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Change / Surplus</span>
-                          <span className={cn("text-xl font-black", balance >= 0 ? "text-emerald-400" : "text-red-500")}>
+                       <div className="flex justify-between items-center bg-slate-950 border border-slate-800 p-4 rounded-xl mt-6">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Change / Surplus</span>
+                          <span className={cn("text-lg font-black", balance >= 0 ? "text-emerald-400" : "text-red-500")}>
                             {formatCurrency(Math.abs(balance))}
                           </span>
                        </div>
                     </div>
 
                     {/* Column 2: Settlement Method */}
-                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-col h-full overflow-hidden">
-                       <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block text-center border-b border-slate-800 pb-1.5 mb-3">Settlement Method</label>
+                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col h-full overflow-hidden">
+                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block pl-1 border-b border-slate-800 pb-2 mb-4 w-full text-left">Settlement Method</label>
                        <div className="space-y-3 flex-1 flex flex-col">
                          <div className="flex gap-4">
                            <button 
                              type="button" disabled={isReadOnlyForm} onClick={() => { if (!isReadOnlyForm) { setIsCash(true); setIsCheck(false); } }}
                              className={cn(
-                               "flex-1 p-2 rounded-lg border flex items-center justify-center gap-2 transition-all",
-                               isCash ? "bg-blue-600/10 border-blue-500 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
+                               "flex-1 h-11 rounded-xl border flex items-center justify-center gap-2.5 transition-all text-xs font-bold",
+                               isCash ? "bg-blue-600/10 border-blue-500/40 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
                                isReadOnlyForm && "opacity-50 cursor-not-allowed"
                              )}
                            >
-                             <div className={cn("w-3 h-3 rounded-full border-2", isCash ? "bg-blue-500 border-blue-400" : "border-slate-700")} />
-                             <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Cash Settlement</span>
+                             <div className={cn("w-3 h-3 rounded-full border-2 transition-colors", isCash ? "bg-blue-500 border-blue-400" : "border-slate-700")} />
+                             <span className="uppercase tracking-wider whitespace-nowrap">Cash Settlement</span>
                            </button>
                            <button 
                              type="button" disabled={isReadOnlyForm} onClick={() => { if (!isReadOnlyForm) { setIsCash(false); setIsCheck(true); } }}
                              className={cn(
-                               "flex-1 p-2 rounded-lg border flex items-center justify-center gap-2 transition-all",
-                               isCheck ? "bg-blue-600/10 border-blue-500 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
+                               "flex-1 h-11 rounded-xl border flex items-center justify-center gap-2.5 transition-all text-xs font-bold",
+                               isCheck ? "bg-blue-600/10 border-blue-500/40 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700",
                                isReadOnlyForm && "opacity-50 cursor-not-allowed"
                              )}
                            >
-                             <div className={cn("w-3 h-3 rounded-full border-2", isCheck ? "bg-blue-500 border-blue-400" : "border-slate-700")} />
-                             <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Check Settlement</span>
+                             <div className={cn("w-3 h-3 rounded-full border-2 transition-colors", isCheck ? "bg-blue-500 border-blue-400" : "border-slate-700")} />
+                             <span className="uppercase tracking-wider whitespace-nowrap">Check Settlement</span>
                            </button>
                          </div>
 
@@ -1397,34 +1443,34 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                            !isCheck ? "opacity-30 pointer-events-none" : "opacity-100"
                          )}>
                            <div className="space-y-1">
-                             <label className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Check Number</label>
+                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Check Number</label>
                              <input 
                                type="text" 
                                value={checkNumber}
                                disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckNumber(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                               className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-4 text-xs text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                                placeholder="Enter No..."
                              />
                            </div>
                            <div className="space-y-1">
-                             <label className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Check Date</label>
+                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Check Date</label>
                              <input 
                                type="date" 
                                value={checkDate}
                                disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckDate(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                               className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-4 text-xs text-white [color-scheme:dark] focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                              />
                            </div>
                            <div className="col-span-2 space-y-1">
-                             <label className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Payee / Drawee</label>
+                             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Payee / Drawee</label>
                              <input 
                                type="text" 
                                value={checkPayee}
                                disabled={!isCheck || isReadOnlyForm}
                                onChange={e => setCheckPayee(e.target.value)}
-                               className="w-full h-7 bg-slate-900 border border-slate-800 rounded px-2 text-[10px] text-white focus:border-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                               className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-4 text-xs text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-75 disabled:cursor-not-allowed"
                                placeholder="Payee Name..."
                              />
                            </div>
@@ -1434,6 +1480,7 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
                   </div>
                 </div>
               </div>
+            </div>
 
               {/* SECTION 4: ACTION TOOLBAR (FIXED FOOTER) */}
               <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
@@ -1705,6 +1752,10 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
 
       {isMigrating && (
         <PaymentMigrator onClose={() => setIsMigrating(false)} />
+      )}
+
+      {isViewingHistory && (
+        <MigrationAuditLogModal onClose={() => setIsViewingHistory(false)} />
       )}
 
       <ConfirmDialog
