@@ -73,9 +73,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, is
   return (
     <aside className="w-64 bg-slate-900/50 backdrop-blur-sm border-r border-slate-800 h-screen fixed left-0 top-0 flex flex-col z-20">
       <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-        <div className="w-8 h-8 bg-slate-900 border border-slate-850 rounded-full flex items-center justify-center shrink-0 shadow-lg shadow-black/40 overflow-hidden">
-          <img src="/logo.png" alt="Dipaculao Logo" className="w-6 h-6 object-contain" referrerPolicy="no-referrer" />
-        </div>
+        <img src="/logo.png" alt="Dipaculao Logo" className="w-9 h-9 object-contain shrink-0" referrerPolicy="no-referrer" />
         <div>
           <h1 className="text-lg font-bold tracking-tight text-white leading-none">RPT System</h1>
           <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest font-bold font-mono">Dipaculao LGU</p>

@@ -60,9 +60,124 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, on
     };
   }, [property.id]);
 
-  const totalOutstanding = history
-    .filter(d => d.status === "Delinquent" && d.year < 2027 && !payments.some(p => p.taxYear === d.year && p.status === "Active"))
-    .reduce((acc, curr) => acc + calculateTotalDue(curr.basicTaxDue, curr.sefTaxDue, curr.year).totalDue, 0);
+  const fullHistory: Delinquency[] = React.useMemo(() => {
+    const currentDate = new Date();
+    const currentYear = Math.min(currentDate.getFullYear(), 2026);
+
+    const getPropertyStartYear = (p: Property): number => {
+      let effYear = currentYear;
+      const raw = (p as any).taxableYear || (p as any).taxable_year || (p as any).startYear || (p as any).start_year || (p as any).declarationYear || p.effectivityDate;
+      if (raw) {
+        if (typeof raw === 'number' && !isNaN(raw)) {
+          effYear = raw;
+        } else if (typeof raw === 'string') {
+          const match = raw.match(/\b(19|20)\d{2}\b/);
+          if (match) {
+            const parsed = parseInt(match[0], 10);
+            if (!isNaN(parsed) && parsed >= 1900 && parsed <= currentYear) {
+              effYear = parsed;
+            }
+          } else {
+            const parsed = parseInt(raw, 10);
+            if (!isNaN(parsed) && parsed > 1900 && parsed <= currentYear) effYear = parsed;
+          }
+        }
+      }
+      if ((p as any).taxabilityStartYear && (p as any).taxabilityStartYear < effYear) {
+        effYear = (p as any).taxabilityStartYear;
+      }
+      return Math.max(1990, effYear || 2010);
+    };
+
+    let startYear = getPropertyStartYear(property);
+
+    const propStoredDelinqs = history.filter(
+      d => (d.propertyId === property.id || (d as any).propertyTdn === property.tdNumber || (d as any).tdNumber === property.tdNumber) && d.year <= currentYear && d.year < 2027
+    );
+
+    if (propStoredDelinqs.length > 0) {
+      const minStoredYear = Math.min(...propStoredDelinqs.map(d => d.year).filter(y => typeof y === 'number' && !isNaN(y)));
+      if (minStoredYear < startYear && minStoredYear >= 1900) {
+        startYear = minStoredYear;
+      }
+    }
+
+    const result: Delinquency[] = [];
+
+    for (let y = startYear; y <= currentYear; y++) {
+      if (y >= 2027) continue;
+
+      const activePayment = payments.find(
+        pay => (pay.propertyId === property.id || (pay as any).propertyTdn === property.tdNumber || (pay as any).tdNumber === property.tdNumber) &&
+               pay.taxYear === y &&
+               pay.status === "Active"
+      );
+
+      const existingD = propStoredDelinqs.find(d => d.year === y);
+      const assessedVal = property.assessedValue || 0;
+      const basic = existingD ? (existingD.basicTaxDue || (assessedVal * 0.01)) : (assessedVal * 0.01);
+      const sef = existingD ? (existingD.sefTaxDue || (assessedVal * 0.01)) : (assessedVal * 0.01);
+      const idle = existingD ? ((existingD as any).idleSurcharge || 0) : 0;
+
+      const calc = calculateTotalDue(basic, sef, y, currentDate, idle);
+
+      if (activePayment) {
+        result.push({
+          id: existingD?.id || `paid-${property.id}-${y}`,
+          propertyId: property.id,
+          year: y,
+          assessedValue: assessedVal,
+          basicTaxDue: basic,
+          sefTaxDue: sef,
+          penalty: 0,
+          interest: 0,
+          totalDue: basic + sef,
+          status: "Paid",
+          paymentDetails: {
+            orNumber: activePayment.orNumber,
+            paymentDate: activePayment.recordedAt || activePayment.paymentDate,
+            amountPaid: activePayment.amountPaid,
+            payerName: activePayment.payerName
+          },
+          createdAt: existingD?.createdAt || activePayment.recordedAt,
+          updatedAt: activePayment.recordedAt
+        } as Delinquency);
+      } else if (existingD) {
+        result.push({
+          ...existingD,
+          propertyId: property.id,
+          assessedValue: assessedVal,
+          basicTaxDue: basic,
+          sefTaxDue: sef,
+          penalty: calc.interest,
+          interest: calc.interest,
+          totalDue: calc.totalDue,
+          status: existingD.status === "Paid" ? "Paid" : (y === currentYear ? "Pending" : "Delinquent")
+        });
+      } else {
+        result.push({
+          id: `virtual-${property.id}-${y}`,
+          propertyId: property.id,
+          year: y,
+          assessedValue: assessedVal,
+          basicTaxDue: basic,
+          sefTaxDue: sef,
+          penalty: calc.interest,
+          interest: calc.interest,
+          totalDue: calc.totalDue,
+          status: y === currentYear ? "Pending" : "Delinquent",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } as Delinquency);
+      }
+    }
+
+    return result.sort((a, b) => b.year - a.year);
+  }, [history, payments, property]);
+
+  const totalOutstanding = fullHistory
+    .filter(d => d.status !== "Paid" && d.year < 2027)
+    .reduce((acc, curr) => acc + curr.totalDue, 0);
 
   const totalPaymentsMade = payments
     .filter(p => p.status === "Active")
@@ -76,7 +191,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, on
       className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4 md:p-8"
     >
       {showRptar ? (
-        <RPTARPrintView property={property} history={history} payments={payments} onClose={() => setShowRptar(false)} />
+        <RPTARPrintView property={property} history={fullHistory} payments={payments} onClose={() => setShowRptar(false)} />
       ) : (
         <motion.div 
           initial={{ scale: 0.95, y: 20 }}
@@ -323,7 +438,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, on
                 Record of Taxes Due and Payment
               </h4>
               <div className="px-3 py-1 bg-slate-800 bg-opacity-70 rounded-full text-[10px] font-bold text-slate-400 border border-slate-700">
-                {history.length} RECORDS FOUND
+                {fullHistory.length} RECORDS FOUND
               </div>
             </div>
 
@@ -331,7 +446,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, on
               <div className="flex items-center justify-center py-20">
                 <div className="w-8 h-8 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
               </div>
-            ) : history.length === 0 ? (
+            ) : fullHistory.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 bg-slate-950/30 rounded-3xl border border-slate-800/50 border-dashed">
                 <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center mb-4">
                   <CheckCircle2 className="w-8 h-8 text-emerald-400" />
@@ -342,7 +457,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, on
             ) : (
               <div className="space-y-3">
                 {(() => {
-                  const grouped = groupDelinquenciesByPenaltyRule(history, property.assessedValue);
+                  const grouped = groupDelinquenciesByPenaltyRule(fullHistory, property.assessedValue);
                   // Sort the groups in ascending order by the minimum year in each group (latest year below)
                   const sortedGrouped = [...grouped].sort((a, b) => {
                     const minA = Math.min(...a.years);
@@ -350,7 +465,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, on
                     return minA - minB;
                   });
                   return sortedGrouped.map((row) => {
-                    const firstYearRecord = history.find(h => h.year === row.years[0]);
+                    const firstYearRecord = fullHistory.find(h => h.year === row.years[0]);
                     const isUnpaidDelinq = row.records.some(r => r.status === "Delinquent" && !payments.some(p => p.taxYear === r.year && p.status === "Active"));
                     const isUnpaidPending = row.records.some(r => r.status === "Pending" && !payments.some(p => p.taxYear === r.year && p.status === "Active"));
                     const status = isUnpaidDelinq ? "Delinquent" : (isUnpaidPending ? "Pending" : "Paid");

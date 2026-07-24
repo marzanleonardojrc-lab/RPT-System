@@ -1011,9 +1011,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
       <aside className="w-full md:w-64 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col z-10">
         <div className="p-6 border-b border-slate-800 flex flex-col gap-2 relative">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600/15 border border-blue-500/30 rounded-xl flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-blue-400" />
-            </div>
+            <img src="/logo.png" alt="Dipaculao Logo" className="w-9 h-9 object-contain shrink-0" referrerPolicy="no-referrer" />
             <div>
               <h2 className="text-sm font-black text-white hover:text-blue-400 leading-tight">DIPACULAO, AURORA</h2>
               <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest font-mono">Taxpayer e-Portal</p>

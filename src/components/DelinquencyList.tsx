@@ -345,8 +345,8 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean, onPostPa
   }> = {};
 
   augmentedDelinquencies.forEach(d => {
-    // Strictly filter out any records that are for the current year or newer
-    if (d.year >= currentYear) return;
+    // Do not include future tax years (2027 onwards)
+    if (d.year > currentYear || d.year >= 2027) return;
 
     const prop = properties.find(p => p.id === d.propertyId);
       if (!prop || prop.isArchived) return;
