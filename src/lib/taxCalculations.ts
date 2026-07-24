@@ -9,23 +9,50 @@ export const IDLE_LAND_RATE = 0.05; // 5% optional/additional surcharge
  * Calculates interest for real property tax delinquency.
  * Interest is 2% per month based on the unpaid primary tax.
  * Maximum interest is 72% (up to 36 months).
- * Penalties for the taxable year start accruing on January 1 of the following year.
+ * For delinquent past years, penalty accrues from Jan 1 of that tax year.
+ * For current tax year (beyond Q1), penalty accrues 2% per month starting Jan 1 (e.g., 14% as of July).
  */
-export function calculatePenalties(baseTax: number, year: number, currentDate: Date = new Date()) {
-  // Penalty starts accruing on Jan 1 of the tax year
-  const penaltyStartDate = startOfYear(new Date(year, 0, 1));
-  
-  // Calculate months from penalty start date to current start of month
-  const currentMonthStart = startOfMonth(currentDate);
-  
-  // differenceInMonths returns the number of full months
+export function calculatePenalties(
+  baseTax: number, 
+  year: number, 
+  currentDate: Date | string = new Date(),
+  lastPaymentDate?: Date | string | null
+) {
+  const cDate = typeof currentDate === 'string' ? new Date(currentDate) : currentDate;
+  const validCurrentDate = isNaN(cDate.getTime()) ? new Date() : cDate;
+  const currentYear = validCurrentDate.getFullYear();
+
+  // If year is in the future relative to system date, no penalty
+  if (year > currentYear) {
+    return { interestAmount: 0, interestRate: 0, monthsCount: 0, isCapped: false };
+  }
+
+  // Determine penalty start date (Jan 1 of the tax year)
+  let penaltyStartDate = startOfYear(new Date(year, 0, 1));
+
+  // If a last payment date in the same year exists, measure from last payment date's month
+  if (lastPaymentDate) {
+    const lDate = typeof lastPaymentDate === 'string' ? new Date(lastPaymentDate) : lastPaymentDate;
+    if (lDate && !isNaN(lDate.getTime()) && lDate.getFullYear() === year) {
+      penaltyStartDate = startOfMonth(lDate);
+    }
+  }
+
+  const currentMonthStart = startOfMonth(validCurrentDate);
+
+  // If current year and within Q1 (Jan 1 - March 31), no penalty
+  if (year === currentYear && validCurrentDate.getMonth() <= 2) {
+    return { interestAmount: 0, interestRate: 0, monthsCount: 0, isCapped: false };
+  }
+
+  // differenceInMonths returns full months count
   const totalMonths = Math.max(0, differenceInMonths(currentMonthStart, penaltyStartDate) + 1);
-  
+
   // Cap at 36 months (72%) according to Sec. 255 of R.A. 7160
   const applicableMonths = Math.min(36, totalMonths);
   const interestRate = applicableMonths * 0.02;
   const interestAmount = baseTax * interestRate;
-  
+
   return {
     interestAmount,
     interestRate,
@@ -38,12 +65,15 @@ export function calculateTotalDue(
   basicTaxDue: number, 
   sefTaxDue: number, 
   year: number, 
-  currentDate: Date = new Date(), 
+  currentDate: Date | string = new Date(), 
   idleSurcharge: number = 0,
   paymentMode: "Full" | "Installment" = "Full",
   selectedQuarters: string[] = [],
-  isAdvance: boolean = false
+  isAdvance: boolean = false,
+  lastPaymentDate?: Date | string | null
 ) {
+  const cDate = typeof currentDate === 'string' ? new Date(currentDate) : currentDate;
+  const validCurrentDate = isNaN(cDate.getTime()) ? new Date() : cDate;
   let combinedBase = basicTaxDue + sefTaxDue + idleSurcharge;
   let interest = 0;
   let discount = 0;
@@ -69,8 +99,8 @@ export function calculateTotalDue(
       if (selectedQuarters.includes(q.name)) {
         const qBase = (basicTaxDue + sefTaxDue) * q.factor;
         let qInt = 0;
-        if (currentDate > q.deadline) {
-          const p = calculatePenalties(qBase, year, currentDate);
+        if (validCurrentDate > q.deadline) {
+          const p = calculatePenalties(qBase, year, validCurrentDate, lastPaymentDate);
           qInt = p.interestAmount;
         }
         totalB += basicTaxDue * q.factor;
@@ -88,18 +118,18 @@ export function calculateTotalDue(
 
   } else {
     // Full Payment Logic
-    const penalties = calculatePenalties(combinedBase, year, currentDate);
+    const penalties = calculatePenalties(combinedBase, year, validCurrentDate, lastPaymentDate);
     interest = penalties.interestAmount;
     
     // Advance Payment (Rule 1): 20% discount if paying for a future year
-    const currentYear = currentDate.getFullYear();
+    const currentYear = validCurrentDate.getFullYear();
     if (year > currentYear) {
       discount = combinedBase * 0.20;
       interest = 0;
     } 
     // Prompt Payment (Rule 2): 10% discount if paying for the current year within Q1 (Jan 1 - Mar 31)
     else if (year === currentYear) {
-      const month = currentDate.getMonth(); // 0 is January, 2 is March
+      const month = validCurrentDate.getMonth(); // 0 is January, 2 is March
       if (month >= 0 && month <= 2) {
         discount = combinedBase * 0.10;
         interest = 0;
@@ -107,7 +137,7 @@ export function calculateTotalDue(
     }
   }
 
-  const penalties = calculatePenalties(combinedBase, year, currentDate);
+  const penalties = calculatePenalties(combinedBase, year, validCurrentDate, lastPaymentDate);
   const totalDue = combinedBase + interest - discount;
   
   return {

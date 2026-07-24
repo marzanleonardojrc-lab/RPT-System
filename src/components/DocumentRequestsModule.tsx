@@ -392,7 +392,7 @@ export default function DocumentRequestsModule() {
           (targetTdNo && (d as any).propertyTdn?.trim().toLowerCase() === targetTdNo.trim().toLowerCase()) ||
           (propertyTdn && (d as any).propertyTdn?.trim().toLowerCase() === propertyTdn.trim().toLowerCase());
 
-        const isUnpaid = d.status !== "Paid" && d.status !== "Voided";
+        const isUnpaid = d.status !== "Paid" && d.status !== "Voided" && d.year < 2027;
         return (matchesId || matchesTdn) && isUnpaid;
       })
       .map((d) => {
@@ -415,9 +415,9 @@ export default function DocumentRequestsModule() {
       return realUnpaid;
     }
 
-    // 3. Virtual unbilled delinquency check for matched property
+    // 3. Virtual unbilled delinquency check for matched property (up to 2026; 2027 is not yet collectible)
     if (matchedProp && !matchedProp.isArchived) {
-      const currentYear = new Date().getFullYear();
+      const currentYear = Math.min(new Date().getFullYear(), 2026);
       let effYear = currentYear;
       if (matchedProp.effectivityDate) {
         let extractedYear = NaN;

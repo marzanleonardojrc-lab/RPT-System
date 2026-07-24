@@ -211,7 +211,15 @@ USING (
     EXISTS (
         SELECT 1 FROM public.users 
         WHERE users.uid = auth.uid()::text 
-        AND (properties.id = ANY(users.linked_property_ids) OR properties.pin = ANY(users.linked_property_ids))
+        AND (
+            properties.id = ANY(users.linked_property_ids) 
+            OR properties.pin = ANY(users.linked_property_ids)
+            OR properties.td_number = ANY(users.linked_property_ids)
+            OR properties.user_id = auth.uid()::text
+            OR properties.taxpayer_id = auth.uid()::text
+            OR properties.owner_email = users.email
+            OR properties.taxpayer_email = users.email
+        )
         AND users.status = 'Approved'
     )
 );

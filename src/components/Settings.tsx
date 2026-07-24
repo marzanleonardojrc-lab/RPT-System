@@ -18,7 +18,7 @@ import {
 import { UserProfile, UserRole, Property } from "../types";
 import { Shield, User, Check, X, Lock, Save, Loader2, AlertCircle, UserPlus, Eye, EyeOff, Sun, Moon, Database, Download, Building2, UserCheck } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
-import { isSupabaseConfigured } from "../lib/supabase";
+import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { logAudit } from "../lib/audit";
 import ConfirmDialog from "./ConfirmDialog";
 import { useAuth } from "../AuthContext";
@@ -238,16 +238,20 @@ const Settings: React.FC = () => {
       const uid = await createSecondaryUser(emailToUse, provPassword);
 
       // Create users collection profile document
+      const initialLinks = [selectedProperty.id, selectedProperty.tdNumber].filter(Boolean);
       const newUserProfile: any = {
         uid: uid,
         email: emailToUse,
         username: cleanUsername,
         displayName: selectedProperty.ownerName,
+        display_name: selectedProperty.ownerName,
         role: "Resident", // As strictly specified
         status: "Approved",
         createdAt: new Date().toISOString(),
+        created_at: new Date().toISOString(),
         requiresPasswordReset: true, // Core login transition guard
-        linkedPropertyIds: [selectedProperty.id]
+        linkedPropertyIds: initialLinks,
+        linked_property_ids: initialLinks
       };
 
       await setDoc(doc(db, "users", uid), newUserProfile);
@@ -295,15 +299,27 @@ const Settings: React.FC = () => {
     setProvError(null);
     setProvSuccess(null);
     try {
-      const currentLinks = existingUser.linkedPropertyIds || [];
-      if (currentLinks.includes(selectedProperty.id)) {
+      const currentLinks = existingUser.linkedPropertyIds || (existingUser as any).linked_property_ids || [];
+      let parsedLinks: string[] = [];
+      if (Array.isArray(currentLinks)) {
+        parsedLinks = currentLinks;
+      } else if (typeof currentLinks === 'string') {
+        try { parsedLinks = JSON.parse(currentLinks); } catch { parsedLinks = [currentLinks]; }
+      }
+
+      if (parsedLinks.includes(selectedProperty.id) || parsedLinks.includes(selectedProperty.tdNumber)) {
         throw new Error(`This property is already linked to the existing profile of ${existingUser.displayName}.`);
       }
       
-      const updatedLinks = [...currentLinks, selectedProperty.id];
+      const updatedLinks = [...parsedLinks, selectedProperty.id, selectedProperty.tdNumber].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
       await updateDoc(doc(db, "users", existingUser.uid), {
-        linkedPropertyIds: updatedLinks
+        linkedPropertyIds: updatedLinks,
+        linked_property_ids: updatedLinks
       });
+
+      // Update in-memory object
+      existingUser.linkedPropertyIds = updatedLinks;
+      (existingUser as any).linked_property_ids = updatedLinks;
 
       // Record logs
       await logAudit("UPDATE", "LinkPropertyToResident", existingUser.uid, { linkedPropertyIds: currentLinks }, {

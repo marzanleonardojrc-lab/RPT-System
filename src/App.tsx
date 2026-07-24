@@ -310,20 +310,12 @@ const AppContent: React.FC = () => {
               <div className="flex gap-3">
                 <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 md:mt-0" />
                 <div>
-                  <h4 className="text-sm font-bold text-amber-400">Firebase Firestore Daily Read Quota Exceeded</h4>
+                  <h4 className="text-sm font-bold text-amber-400">Database Connection Notice</h4>
                   <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    The free tier database read quota for this project has been exhausted for today. The system is operating in restricted local-offline mode. Please wait for the daily reset tomorrow or upgrade your Firebase plan.
+                    The application is operating in high-fidelity local-first storage mode with Supabase offline synchronization. All records, payments, and property changes are safely stored locally.
                   </p>
                 </div>
               </div>
-              <a 
-                href="https://console.firebase.google.com/project/gen-lang-client-0015493170/firestore/databases/ai-studio-3027ba5d-1b4c-4ad6-8dbc-237c33ad3844/data?openUpgradeDialog=true"
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md shadow-amber-500/10 text-center"
-              >
-                Upgrade Plan in Console
-              </a>
             </div>
           )}
           {renderContent()}

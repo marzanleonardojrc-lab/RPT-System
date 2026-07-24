@@ -128,15 +128,18 @@ export async function signUpWithEmail(
     const assignedStatus = (isAdminEmail || targetRole === 'Taxpayer') ? 'Approved' : 'Pending';
 
     // 3. Create a corresponding profile in the public/users table
-    const profileData: UserProfile = {
+    const profileData: any = {
       uid: data.user.id,
       email,
       displayName: name,
+      display_name: name,
       username: formattedUsername,
       role: assignedRole,
       status: assignedStatus as any,
       createdAt: new Date().toISOString(),
-      linkedPropertyIds,
+      created_at: new Date().toISOString(),
+      linkedPropertyIds: linkedPropertyIds || [],
+      linked_property_ids: linkedPropertyIds || [],
       designation: designation || "Treasury Tax Encoder",
     };
 
@@ -324,7 +327,31 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     return null;
   }
 
-  return data as UserProfile | null;
+  if (!data) return null;
+
+  let linkedPropertyIds: string[] = [];
+  const rawLinked = data.linkedPropertyIds ?? data.linked_property_ids;
+  if (Array.isArray(rawLinked)) {
+    linkedPropertyIds = rawLinked;
+  } else if (typeof rawLinked === 'string') {
+    try {
+      linkedPropertyIds = JSON.parse(rawLinked);
+    } catch {
+      linkedPropertyIds = rawLinked.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  return {
+    uid: data.uid || userId,
+    email: data.email || "",
+    displayName: data.displayName || data.display_name || data.email?.split('@')[0] || "User",
+    username: data.username || "",
+    role: data.role || "User",
+    status: data.status || "Approved",
+    createdAt: data.createdAt || data.created_at || new Date().toISOString(),
+    linkedPropertyIds: Array.isArray(linkedPropertyIds) ? linkedPropertyIds : [],
+    designation: data.designation || "",
+  };
 }
 
 /**

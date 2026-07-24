@@ -33,7 +33,7 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { logAudit } from "../lib/audit";
+import { logAudit, fetchAuditLogs } from "../lib/audit";
 
 interface DelinquencyActionsProps {
   delinquency: Delinquency;
@@ -94,18 +94,16 @@ const DelinquencyActions: React.FC<DelinquencyActionsProps> = ({
   useEffect(() => {
     if (activeTab === "audit") {
       setLoadingLogs(true);
-      const q = query(
-        collection(db, "audit_logs"),
-        where("entityId", "==", delinquency.id),
-        orderBy("timestamp", "desc")
-      );
-
-      return onSnapshot(q, (snapshot) => {
-        setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AuditLog)));
-        setLoadingLogs(false);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, "audit_logs");
-      });
+      fetchAuditLogs({ entityId: delinquency.id })
+        .then((logs) => {
+          setAuditLogs(logs);
+        })
+        .catch((err) => {
+          console.warn("Failed loading audit logs:", err);
+        })
+        .finally(() => {
+          setLoadingLogs(false);
+        });
     }
   }, [activeTab, delinquency.id]);
 

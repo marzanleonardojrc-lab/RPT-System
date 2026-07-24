@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   collection, 
   onSnapshot, 
@@ -14,10 +14,11 @@ import {
   OperationType, 
   handleFirestoreError 
 } from "../lib/firebase";
-import { UserProfile, Property, Delinquency, Payment, ResidentQuery, QueryCategory, QueryStatus, QueryReply } from "../types";
+import { UserProfile, Property, Delinquency, Payment, ResidentQuery, QueryCategory, QueryStatus, QueryReply, SupabaseNotification } from "../types";
 import { formatCurrency, resolveModernColors, cn } from "../lib/utils";
-import { calculateTotalDue, calculatePenalties } from "../lib/taxCalculations";
+import { calculateTotalDue, calculatePenalties, groupDelinquenciesByPenaltyRule } from "../lib/taxCalculations";
 import { logAudit } from "../lib/audit";
+import { getTaxpayerNotifications } from "../lib/notifications";
 import { 
   Building2, 
   CreditCard, 
@@ -51,9 +52,11 @@ import {
   CheckCircle2,
   Tag,
   X,
-  ChevronRight
+  ChevronRight,
+  Eye
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { RPTARPrintView } from "./RPTARPrintView";
 
 interface TaxpayerPortalProps {
   profile: UserProfile | null;
@@ -66,6 +69,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
   const [properties, setProperties] = useState<Property[]>([]);
   const [delinquencies, setDelinquencies] = useState<Delinquency[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [viewingLedgerProp, setViewingLedgerProp] = useState<Property | null>(null);
 
   // Resident queries state
   const [residentQueries, setResidentQueries] = useState<ResidentQuery[]>([]);
@@ -124,7 +128,18 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
   // Archival Notices & System Alerts
   const [archivedNotices, setArchivedNotices] = useState<any[]>([]);
 
-  // Notifications
+  // Notifications & Supabase Live Notifications
+  const [supabaseNotifs, setSupabaseNotifs] = useState<SupabaseNotification[]>([]);
+  const [liveToast, setLiveToast] = useState<{
+    id: string;
+    title: string;
+    message: string;
+    reason?: string;
+    archivedBy?: string;
+    tdNumber?: string;
+    timestamp: string;
+  } | null>(null);
+
   const [notifications, setNotifications] = useState<any[]>([
     {
       id: "notif-1",
@@ -142,20 +157,141 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
     }
   ]);
 
+  // Load Supabase Notifications & setup live listener
+  useEffect(() => {
+    const fetchSupabaseNotifs = async () => {
+      try {
+        const notifs = await getTaxpayerNotifications(profile?.email || profile?.displayName || profile?.uid);
+        setSupabaseNotifs(notifs);
+      } catch (err) {
+        console.warn("Error fetching Supabase notifications:", err);
+      }
+    };
+
+    fetchSupabaseNotifs();
+
+    const handleArchivalToast = (e: any) => {
+      const detail = e.detail;
+      if (!detail) return;
+      const { notification, property, reason, archivedBy } = detail;
+
+      const profileName = (profile?.displayName || "").toLowerCase().trim();
+      const profileEmail = (profile?.email || "").toLowerCase().trim();
+      const ownerName = (property?.ownerName || notification?.taxpayer_name || "").toLowerCase().trim();
+      
+      const isOwnerMatch = ownerName && profileName && (profileName.includes(ownerName) || ownerName.includes(profileName));
+      const isLinkedMatch = profile?.linkedPropertyIds?.includes(property?.id || notification?.property_id);
+      const isEmailMatch = profileEmail && (notification?.taxpayer_email?.toLowerCase().trim() === profileEmail || property?.recordedBy?.toLowerCase().trim() === profileEmail);
+      const isBroadcast = notification?.taxpayer_id === "SYSTEM_BROADCAST";
+
+      if (isOwnerMatch || isLinkedMatch || isEmailMatch || isBroadcast || !profile?.uid) {
+        setLiveToast({
+          id: notification?.id || `toast-${Date.now()}`,
+          title: notification?.title || `Property Record Archived`,
+          message: notification?.message || `Notice: Property under Tax Dec No. ${property?.tdNumber || notification?.td_number} has been archived.`,
+          reason: reason || notification?.reason,
+          archivedBy: archivedBy || notification?.archived_by,
+          tdNumber: property?.tdNumber || notification?.td_number,
+          timestamp: notification?.created_at || new Date().toISOString()
+        });
+
+        if (notification) {
+          setSupabaseNotifs(prev => [notification, ...prev]);
+        }
+      }
+    };
+
+    window.addEventListener("taxpayer_archival_toast", handleArchivalToast);
+    return () => {
+      window.removeEventListener("taxpayer_archival_toast", handleArchivalToast);
+    };
+  }, [profile, properties]);
+
   // Fetch data
   useEffect(() => {
     // 1. Fetch properties
     const unsubProp = onSnapshot(collection(db, "properties"), (snapshot) => {
-      const allProps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property));
+      const allProps = snapshot.docs.map(doc => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          ...d,
+          assessedValue: Number(d.assessedValue ?? d.assessed_value ?? 0),
+          effectivityDate: String(d.effectivityDate ?? d.effectivity_date ?? d.taxableYear ?? d.taxable_year ?? d.startYear ?? d.start_year ?? d.declarationYear ?? d.declaration_year ?? ""),
+          tdNumber: String(d.tdNumber ?? d.td_number ?? d.tdNo ?? d.td_no ?? ""),
+          pin: String(d.pin ?? ""),
+          ownerName: String(d.ownerName ?? d.owner_name ?? ""),
+          ownerAddress: String(d.ownerAddress ?? d.owner_address ?? ""),
+          classification: d.classification ?? "LAND",
+          lotNo: String(d.lotNo ?? d.lot_no ?? ""),
+          blkNo: String(d.blkNo ?? d.blk_no ?? ""),
+          area: String(d.area ?? ""),
+        } as Property;
+      });
       
       // Filter properties matching this taxpayer
       const matches = allProps.filter(p => {
         if (p.isArchived) return false;
-        const isLinkedByProfile = profile?.linkedPropertyIds?.includes(p.id) || false;
-        const matchesOwnerName = p.ownerName && profile?.displayName && p.ownerName.toLowerCase().includes((profile.displayName).toLowerCase());
-        const matchesEmailContact = p.recordedBy === profile?.email;
-        return isLinkedByProfile || matchesOwnerName || matchesEmailContact;
+
+        // 1. Check linked property IDs from user profile (handles both camelCase and snake_case)
+        const profileLinks = profile?.linkedPropertyIds || (profile as any)?.linked_property_ids || [];
+        let parsedLinks: string[] = [];
+        if (Array.isArray(profileLinks)) {
+          parsedLinks = profileLinks;
+        } else if (typeof profileLinks === 'string') {
+          try { parsedLinks = JSON.parse(profileLinks); } catch { parsedLinks = [profileLinks]; }
+        }
+
+        const isLinkedByProfile = parsedLinks.some(link => {
+          if (!link) return false;
+          const cleanLink = String(link).trim().toLowerCase();
+          const pId = String(p.id).trim().toLowerCase();
+          const pTdn = p.tdNumber ? String(p.tdNumber).trim().toLowerCase() : "";
+          const pPin = p.pin ? String(p.pin).trim().toLowerCase() : "";
+          return cleanLink === pId || (pTdn && cleanLink === pTdn) || (pPin && cleanLink === pPin);
+        });
+
+        // 2. Direct property ownership/account fields on property record itself
+        const profileUid = profile?.uid ? String(profile.uid).trim().toLowerCase() : "";
+        const profileEmail = profile?.email ? String(profile.email).trim().toLowerCase() : "";
+
+        const isDirectUserMatch = Boolean(
+          (profileUid && (
+            ((p as any).userId && String((p as any).userId).trim().toLowerCase() === profileUid) ||
+            ((p as any).taxpayerId && String((p as any).taxpayerId).trim().toLowerCase() === profileUid) ||
+            ((p as any).taxpayer_id && String((p as any).taxpayer_id).trim().toLowerCase() === profileUid)
+          )) ||
+          (profileEmail && (
+            ((p as any).taxpayerEmail && String((p as any).taxpayerEmail).trim().toLowerCase() === profileEmail) ||
+            ((p as any).taxpayer_email && String((p as any).taxpayer_email).trim().toLowerCase() === profileEmail) ||
+            ((p as any).ownerEmail && String((p as any).ownerEmail).trim().toLowerCase() === profileEmail)
+          ))
+        );
+
+        // 3. Robust Name matching (handles "Dela Cruz, Juan" vs "Juan Dela Cruz")
+        const normalizeStr = (str?: string) => (str || "").toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
+        const propOwner = normalizeStr(p.ownerName);
+        const userDisplay = normalizeStr(profile?.displayName);
+
+        let matchesOwnerName = false;
+        if (propOwner && userDisplay) {
+          if (propOwner.includes(userDisplay) || userDisplay.includes(propOwner)) {
+            matchesOwnerName = true;
+          } else {
+            // Check token intersection
+            const userTokens = userDisplay.split(/\s+/).filter(t => t.length >= 3);
+            if (userTokens.length > 0) {
+              const matchedTokens = userTokens.filter(token => propOwner.includes(token));
+              if (matchedTokens.length >= Math.min(2, userTokens.length)) {
+                matchesOwnerName = true;
+              }
+            }
+          }
+        }
+
+        return isLinkedByProfile || isDirectUserMatch || matchesOwnerName;
       });
+
       setProperties(matches);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "properties");
@@ -301,8 +437,8 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
   // Handle claiming a property
   const handleClaimProperty = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!claimTdn && !claimPin) {
-      setClaimError("Please input at least a Tax Declaration Number (TDN) or PIN.");
+    if (!claimTdn && !claimPin && !claimOwnerName) {
+      setClaimError("Please input at least a Tax Declaration Number (TDN), PIN, or Registered Owner Name.");
       return;
     }
     setClaimError(null);
@@ -312,41 +448,67 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
     try {
       // Fetch properties to match
       const snap = await getDocs(collection(db, "properties"));
-      const matchedProp = snap.docs.find(doc => {
-        const data = doc.data();
-        const tdnMatch = claimTdn ? data.tdNumber?.trim().toLowerCase() === claimTdn.trim().toLowerCase() : true;
-        const pinMatch = claimPin ? data.pin?.trim().toLowerCase() === claimPin.trim().toLowerCase() : true;
-        const ownerMatch = claimOwnerName ? data.ownerName?.trim().toLowerCase().includes(claimOwnerName.trim().toLowerCase()) : true;
-        return tdnMatch && pinMatch && ownerMatch && !data.isArchived;
+      const allPropDocs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property));
+
+      const matchedProp = allPropDocs.find(p => {
+        if (p.isArchived) return false;
+
+        const cleanTdn = claimTdn.trim().toLowerCase();
+        const cleanPin = claimPin.trim().toLowerCase();
+        const cleanOwner = claimOwnerName.trim().toLowerCase();
+
+        const tdnMatch = cleanTdn ? (p.tdNumber && p.tdNumber.trim().toLowerCase() === cleanTdn) : false;
+        const pinMatch = cleanPin ? (p.pin && p.pin.trim().toLowerCase() === cleanPin) : false;
+        
+        if (tdnMatch || pinMatch) return true;
+
+        if (cleanOwner && p.ownerName) {
+          const normPropOwner = p.ownerName.toLowerCase().replace(/[^a-z0-9]/g, " ");
+          const normClaimOwner = cleanOwner.replace(/[^a-z0-9]/g, " ");
+          if (normPropOwner.includes(normClaimOwner) || normClaimOwner.includes(normPropOwner)) {
+            return true;
+          }
+        }
+
+        return false;
       });
 
       if (!matchedProp) {
-        setClaimError("No matching property record was found in the Dipaculao registry. Please double-check your Tax Declaration Certificate of Title details.");
+        setClaimError("No matching active property record was found in the Dipaculao registry. Please double-check your Tax Declaration Certificate details.");
         setIsClaiming(false);
         return;
       }
 
       const pId = matchedProp.id;
-      const pData = matchedProp.data() as Property;
+      const pData = matchedProp;
 
       // Update user document with this linkedPropertyId
-      const currentLinks = profile?.linkedPropertyIds || [];
-      if (currentLinks.includes(pId)) {
+      const currentLinks = profile?.linkedPropertyIds || (profile as any)?.linked_property_ids || [];
+      let parsedLinks: string[] = Array.isArray(currentLinks) ? [...currentLinks] : [];
+
+      if (parsedLinks.includes(pId) || parsedLinks.includes(pData.tdNumber)) {
         setClaimError("This property is already linked and registered to your taxpayer account.");
         setIsClaiming(false);
         return;
       }
 
-      const newLinks = [...currentLinks, pId];
-      await updateDoc(doc(db, "users", profile!.uid), {
-        linkedPropertyIds: newLinks
-      });
+      const updatedLinks = [...parsedLinks, pId, pData.tdNumber].filter((v, i, a) => a.indexOf(v) === i);
 
-      // Update local profile profile state isn't strictly reactive since it's from context,
-      // but the collection listener will re-index since profile will sync eventually.
-      if (profile) {
-        profile.linkedPropertyIds = newLinks;
+      if (profile?.uid) {
+        await updateDoc(doc(db, "users", profile.uid), {
+          linkedPropertyIds: updatedLinks,
+          linked_property_ids: updatedLinks
+        });
+
+        profile.linkedPropertyIds = updatedLinks;
+        (profile as any).linked_property_ids = updatedLinks;
       }
+
+      // Immediately append matchedProp to local properties state if not present
+      setProperties(prev => {
+        if (prev.some(p => p.id === matchedProp.id)) return prev;
+        return [matchedProp, ...prev];
+      });
 
       // Log audit
       await logAudit("APPROVE", "TaxpayerPropertyLink", pId, null, {
@@ -360,7 +522,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
         {
           id: `link-notif-${Date.now()}`,
           title: "Property Successfully Linked",
-          message: `Your account is now securely linked to Property TDN: ${pData.tdNumber} (Assessed at ₱${pData.assessedValue.toLocaleString()}). Outstanding liabilities have been synced.`,
+          message: `Your account is now securely linked to Property TDN: ${pData.tdNumber} (Assessed at ₱${(pData.assessedValue || 0).toLocaleString()}). Outstanding liabilities have been synced.`,
           type: "success",
           date: new Date().toISOString().split("T")[0]
         },
@@ -434,16 +596,165 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
     }
   };
 
-  // Calculate liabilities and checkout items
-  const linkedPropertyIds = properties.map(p => p.id);
-  const propertyDelinquencies = delinquencies
-    .filter(d => linkedPropertyIds.includes(d.propertyId) && d.status !== "Paid" && d.status !== "Voided")
-    .sort((a, b) => {
-      if (a.propertyId !== b.propertyId) {
-        return a.propertyId.localeCompare(b.propertyId);
+  // Helper to get start year for property tax calculation
+  const getPropertyStartYear = (p: Property): number => {
+    const currentYear = Math.min(new Date().getFullYear(), 2026);
+    let effYear = currentYear;
+    const raw = (p as any).taxableYear || (p as any).taxable_year || (p as any).startYear || (p as any).start_year || (p as any).declarationYear || p.effectivityDate;
+    if (raw) {
+      if (typeof raw === 'number' && !isNaN(raw)) {
+        effYear = raw;
+      } else if (typeof raw === 'string') {
+        const match = raw.match(/\b(19|20)\d{2}\b/);
+        if (match) {
+          const parsed = parseInt(match[0], 10);
+          if (!isNaN(parsed) && parsed >= 1900 && parsed <= currentYear) {
+            effYear = parsed;
+          }
+        } else if (raw.includes("-") || raw.includes("/")) {
+          const parsed = new Date(raw).getFullYear();
+          if (!isNaN(parsed)) effYear = parsed;
+        } else {
+          const parsed = parseInt(raw, 10);
+          if (!isNaN(parsed) && parsed > 1900 && parsed <= currentYear) effYear = parsed;
+        }
       }
-      return a.year - b.year;
+    }
+    return effYear > currentYear ? currentYear : effYear;
+  };
+
+  // Compile full set of property liabilities (from start year like 2010 to current collectible year up to 2026) with dynamically accrued interest as of today
+  const propertyDelinquencies: Delinquency[] = useMemo(() => {
+    const result: Delinquency[] = [];
+    const currentDate = new Date();
+    // 2027 tax has yet to be collected; cap current collectible tax year to 2026
+    const currentYear = Math.min(currentDate.getFullYear(), 2026);
+
+    properties.forEach(p => {
+      if (p.isArchived) return;
+
+      let effYear = getPropertyStartYear(p);
+
+      // Cross-check stored delinquencies for this property to find any earlier year in DB (excluding 2027+)
+      const propStoredDelinqs = delinquencies.filter(
+        d => (d.propertyId === p.id || (d as any).propertyTdn === p.tdNumber || (d as any).tdNumber === p.tdNumber) &&
+             d.status !== "Paid" &&
+             d.status !== "Voided" &&
+             d.year <= currentYear &&
+             d.year < 2027
+      );
+      if (propStoredDelinqs.length > 0) {
+        const minStoredYear = Math.min(...propStoredDelinqs.map(d => d.year).filter(y => typeof y === 'number' && !isNaN(y)));
+        if (minStoredYear < effYear && minStoredYear >= 1900) {
+          effYear = minStoredYear;
+        }
+      }
+
+      for (let y = effYear; y <= currentYear; y++) {
+        if (y >= 2027) continue;
+
+        // Check if there is an active payment for this property and year
+        const hasPayment = payments.some(
+          pay => (pay.propertyId === p.id || (pay as any).propertyTdn === p.tdNumber || (pay as any).tdNumber === p.tdNumber) &&
+                 pay.taxYear === y &&
+                 pay.status === "Active"
+        );
+        if (hasPayment) continue;
+
+        // Check if there is an existing stored delinquency in Firestore
+        const existingD = propStoredDelinqs.find(d => d.year === y);
+
+        const assessedVal = p.assessedValue || 0;
+        const basic = existingD ? (existingD.basicTaxDue || (assessedVal * 0.01)) : (assessedVal * 0.01);
+        const sef = existingD ? (existingD.sefTaxDue || (assessedVal * 0.01)) : (assessedVal * 0.01);
+        const idle = existingD ? ((existingD as any).idleSurcharge || 0) : 0;
+
+        const calc = calculateTotalDue(basic, sef, y, currentDate, idle);
+
+        if (existingD) {
+          result.push({
+            ...existingD,
+            propertyId: p.id,
+            assessedValue: assessedVal,
+            basicTaxDue: basic,
+            sefTaxDue: sef,
+            penalty: calc.interest,
+            interest: calc.interest,
+            totalDue: calc.totalDue
+          });
+        } else {
+          // Virtual unbilled delinquency record for year y
+          result.push({
+            id: `virtual-${p.id}-${y}`,
+            propertyId: p.id,
+            year: y,
+            assessedValue: assessedVal,
+            basicTaxDue: basic,
+            sefTaxDue: sef,
+            penalty: calc.interest,
+            interest: calc.interest,
+            totalDue: calc.totalDue,
+            status: y === currentYear ? "Pending" : "Delinquent",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          } as Delinquency);
+        }
+      }
     });
+
+    return result
+      .filter(d => d.year < 2027)
+      .sort((a, b) => {
+        if (a.propertyId !== b.propertyId) {
+          return a.propertyId.localeCompare(b.propertyId);
+        }
+        return a.year - b.year;
+      });
+  }, [properties, delinquencies, payments]);
+
+  // Group consecutive tax years with same assessed value AND same penalty surcharge rate/calculation
+  const groupedPropertyDelinquencies = useMemo(() => {
+    const result: {
+      id: string;
+      propertyId: string;
+      yearDisplay: string;
+      startYear: number;
+      endYear: number;
+      count: number;
+      basicTaxDue: number;
+      sefTaxDue: number;
+      penalty: number;
+      totalDue: number;
+      individualDelinquencyIds: string[];
+    }[] = [];
+
+    properties.forEach(p => {
+      if (p.isArchived) return;
+      const propDelinqs = propertyDelinquencies.filter(d => d.propertyId === p.id);
+      if (propDelinqs.length === 0) return;
+
+      const groups = groupDelinquenciesByPenaltyRule(propDelinqs, p.assessedValue);
+      groups.forEach(g => {
+        const startYr = g.years[0];
+        const endYr = g.years[g.years.length - 1];
+        result.push({
+          id: g.ids.join("-"),
+          propertyId: p.id,
+          yearDisplay: g.yearDisplay ? g.yearDisplay.replace(" – ", " - ") : (startYr === endYr ? `${startYr}` : `${startYr} - ${endYr}`),
+          startYear: startYr,
+          endYear: endYr,
+          count: g.years.length,
+          basicTaxDue: g.totalBasic,
+          sefTaxDue: g.totalSef,
+          penalty: g.totalInterest,
+          totalDue: g.totalDue,
+          individualDelinquencyIds: g.ids
+        });
+      });
+    });
+
+    return result;
+  }, [properties, propertyDelinquencies]);
 
   const calculateTotalLiabilitiesAmount = () => {
     return propertyDelinquencies.reduce((sum, d) => sum + (d.totalDue || 0), 0);
@@ -470,7 +781,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
       let amountSum = 0;
 
       for (const dId of selectedDelinqs) {
-        const delinq = delinquencies.find(d => d.id === dId);
+        const delinq = propertyDelinquencies.find(d => d.id === dId) || delinquencies.find(d => d.id === dId);
         if (!delinq) continue;
 
         const prop = properties.find(p => p.id === delinq.propertyId);
@@ -508,12 +819,34 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
 
         await setDoc(doc(db, "payments", paymentPayload.id), paymentPayload);
 
-        // 2. Update delinquency document status to Paid in database
-        await updateDoc(doc(db, "delinquencies", delinq.id), {
-          status: "Paid",
-          totalPaid: chunkSum,
-          updatedAt: now.toISOString()
-        });
+        // 2. Update or create delinquency document status in database
+        if (delinq.id.startsWith("virtual-")) {
+          await addDoc(collection(db, "delinquencies"), {
+            propertyId: delinq.propertyId,
+            propertyTdn: prop.tdNumber,
+            year: delinq.year,
+            assessedValue: prop.assessedValue,
+            basicTaxDue: basicPaidValue,
+            sefTaxDue: sefPaidValue,
+            penalty: penaltyPaidValue,
+            interest: penaltyPaidValue,
+            totalDue: chunkSum,
+            status: "Paid",
+            totalPaid: chunkSum,
+            recordedBy: profile?.username || profile?.displayName || "Taxpayer e-Portal",
+            createdAt: now.toISOString(),
+            updatedAt: now.toISOString()
+          });
+        } else {
+          await updateDoc(doc(db, "delinquencies", delinq.id), {
+            status: "Paid",
+            penalty: penaltyPaidValue,
+            interest: penaltyPaidValue,
+            totalDue: chunkSum,
+            totalPaid: chunkSum,
+            updatedAt: now.toISOString()
+          });
+        }
 
         // 3. Log into Audit logs
         await logAudit("CREATE", "OnlineCollection", paymentPayload.id, null, {
@@ -560,7 +893,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
   const getSubTotalSelected = () => {
     let sum = 0;
     selectedDelinqs.forEach(dId => {
-      const d = delinquencies.find(del => del.id === dId);
+      const d = propertyDelinquencies.find(del => del.id === dId) || delinquencies.find(del => del.id === dId);
       if (d) sum += d.totalDue;
     });
     return sum;
@@ -846,6 +1179,57 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
             </div>
           </div>
 
+          {/* REAL-TIME SUPABASE NOTIFICATION TOAST BANNER */}
+          <AnimatePresence>
+            {liveToast && (
+              <motion.div 
+                initial={{ opacity: 0, y: -20, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -20, scale: 0.98 }}
+                className="mb-8 p-5 bg-gradient-to-r from-red-950/90 via-slate-900 to-amber-950/90 border-2 border-red-500/50 rounded-2xl shadow-2xl backdrop-blur-md relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/10 rounded-full blur-2xl pointer-events-none" />
+                <div className="flex items-start justify-between gap-4 relative z-10">
+                  <div className="flex items-start gap-3.5">
+                    <div className="p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-400 shrink-0 mt-0.5">
+                      <Bell className="w-6 h-6 animate-bounce" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest border border-red-500/30 rounded">
+                          SUPABASE LIVE NOTIFICATION
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {new Date(liveToast.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <h3 className="text-base font-black text-white tracking-tight">
+                        {liveToast.title}
+                      </h3>
+                      <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
+                        {liveToast.message}
+                      </p>
+                      {liveToast.reason && (
+                        <div className="mt-2.5 p-3 bg-slate-950/90 border border-amber-500/30 rounded-xl text-xs text-amber-200 font-mono">
+                          <span className="text-amber-400 font-bold uppercase text-[10px] block mb-0.5">Official Archival Remarks:</span>
+                          "{liveToast.reason}"
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setLiveToast(null)}
+                    className="p-2 text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 rounded-xl transition-all shrink-0 cursor-pointer"
+                    title="Dismiss Notification"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* DYNAMIC SUBTAB VIEWS */}
 
           {/* 1. CONTROL CENTER / DASHBOARD */}
@@ -1002,30 +1386,30 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="border-b border-slate-800 text-[10px] text-slate-500 font-black uppercase tracking-wider h-10">
-                          <th className="pb-3">Property Location / TDN</th>
-                          <th className="pb-3">Classification</th>
-                          <th className="pb-3">Taxable Year</th>
-                          <th className="pb-3">Basic Tax Due</th>
-                          <th className="pb-3">SEF Due</th>
-                          <th className="pb-3">Interest / Penalty</th>
-                          <th className="pb-3 text-right">Total Due</th>
+                          <th className="pb-3 px-3">Property Location / TDN</th>
+                          <th className="pb-3 px-3">Classification</th>
+                          <th className="pb-3 px-3 text-center">Taxable Year</th>
+                          <th className="pb-3 px-3 text-right">Basic Tax Due</th>
+                          <th className="pb-3 px-3 text-right">SEF Due</th>
+                          <th className="pb-3 px-3 text-right">Interest / Penalty</th>
+                          <th className="pb-3 px-3 text-right pr-2">Total Due</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40 text-xs">
-                        {propertyDelinquencies.slice(0, 4).map(d => {
+                        {groupedPropertyDelinquencies.slice(0, 15).map(d => {
                           const prop = getDelinquencyProperty(d.propertyId);
                           return (
                             <tr key={d.id} className="h-12 hover:bg-slate-900/20 transition-colors">
-                              <td className="py-2">
+                              <td className="py-2.5 px-3">
                                 <p className="font-bold text-white">{prop?.tdNumber || "Unknown"}</p>
                                 <p className="text-[10px] text-slate-500">{prop?.barangay || "---"}, Dipaculao</p>
                               </td>
-                              <td className="py-2 text-slate-300 font-semibold">{prop?.classification || "LAND"}</td>
-                              <td className="py-2 font-mono text-slate-400 font-bold">{d.year}</td>
-                              <td className="py-2 text-slate-300">{formatCurrency(d.basicTaxDue)}</td>
-                              <td className="py-2 text-slate-300">{formatCurrency(d.sefTaxDue)}</td>
-                              <td className="py-2 text-red-400/80 font-mono">+{formatCurrency((d.penalty || 0) + (d.interest || 0))}</td>
-                              <td className="py-2 text-right font-black text-rose-400 text-sm font-mono">{formatCurrency(d.totalDue)}</td>
+                              <td className="py-2.5 px-3 text-slate-300 font-semibold">{prop?.classification || "LAND"}</td>
+                              <td className="py-2.5 px-3 text-center font-mono text-slate-300 font-bold">{d.yearDisplay}</td>
+                              <td className="py-2.5 px-3 text-right text-slate-300 font-semibold">{formatCurrency(d.basicTaxDue)}</td>
+                              <td className="py-2.5 px-3 text-right text-slate-300 font-semibold">{formatCurrency(d.sefTaxDue)}</td>
+                              <td className="py-2.5 px-3 text-right text-red-400/80 font-mono font-bold">+{formatCurrency(d.penalty)}</td>
+                              <td className="py-2.5 px-3 text-right font-black text-rose-400 text-sm font-mono pr-2">{formatCurrency(d.totalDue)}</td>
                             </tr>
                           );
                         })}
@@ -1165,33 +1549,35 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                             </div>
                           </div>
 
-                          <div className="flex justify-between items-center border-t border-slate-800/40 pt-4 mt-2">
+                          <div className="flex justify-between items-center border-t border-slate-800/40 pt-4 mt-2 gap-2 flex-wrap">
                             <div>
                               <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest block">Outstanding Tax</span>
                               <span className={`text-md font-mono font-black ${totalDue > 0 ? "text-rose-400" : "text-emerald-400"}`}>
                                 {totalDue > 0 ? formatCurrency(totalDue) : "Settled (₱0.00)"}
                               </span>
                             </div>
-                            <button
-                              onClick={() => {
-                                if (totalDue > 0) {
-                                  // Set selection for this property
-                                  const selectSet = new Set<string>();
-                                  propLiabilities.forEach(l => selectSet.add(l.id));
-                                  setSelectedDelinqs(selectSet);
-                                  setActiveSubTab("payments");
-                                } else {
-                                  setActiveSubTab("payments");
-                                }
-                              }}
-                              className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer ${
-                                totalDue > 0
-                                  ? "bg-rose-500 hover:bg-rose-400 text-white shadow-lg"
-                                  : "bg-slate-800 hover:bg-slate-700 text-slate-400"
-                              }`}
-                            >
-                              {totalDue > 0 ? "Settle Tax Due" : "Payment History"}
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  if (totalDue > 0) {
+                                    // Set selection for this property
+                                    const selectSet = new Set<string>();
+                                    propLiabilities.forEach(l => selectSet.add(l.id));
+                                    setSelectedDelinqs(selectSet);
+                                    setActiveSubTab("payments");
+                                  } else {
+                                    setActiveSubTab("payments");
+                                  }
+                                }}
+                                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer shrink-0 ${
+                                  totalDue > 0
+                                    ? "bg-rose-500 hover:bg-rose-400 text-white shadow-lg"
+                                    : "bg-slate-800 hover:bg-slate-700 text-slate-400"
+                                }`}
+                              >
+                                {totalDue > 0 ? "Settle Tax Due" : "View Payment History"}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -1205,6 +1591,64 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
           {/* 3. TAX OBLIGATIONS & FINANCIAL LEDGER */}
           {activeSubTab === "payments" && (
             <div className="space-y-6 animate-in fade-in duration-300">
+              {/* OFFICIAL RPTAR ACTUAL LEDGER SELECTOR CARD */}
+              <div className="bg-slate-900/40 border border-blue-500/30 p-6 rounded-3xl shadow-xl relative overflow-hidden">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-center shrink-0">
+                      <FileSpreadsheet className="w-5 h-5 text-blue-400" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                          Official Real Property Tax Account Register (Actual Ledger)
+                        </h3>
+                        <span className="bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[9px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                          <Eye className="w-3 h-3 text-amber-400" /> View Only
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Select any of your registered property records to inspect its full official municipal account ledger (RPTAR) in view-only mode.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {properties.length === 0 ? (
+                  <div className="p-4 bg-slate-950/40 rounded-2xl border border-slate-800 text-slate-500 text-xs italic">
+                    No registered properties linked under your account yet.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {properties.map(p => (
+                      <div key={p.id} className="bg-slate-950/80 border border-slate-800 hover:border-blue-500/50 p-4 rounded-2xl flex flex-col justify-between transition-all group">
+                        <div className="mb-3">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-bold font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-lg border border-blue-500/20">
+                              TDN: {p.tdNumber}
+                            </span>
+                            <span className="text-[8px] font-black uppercase text-slate-500">
+                              {p.classification}
+                            </span>
+                          </div>
+                          <p className="text-xs font-black text-white uppercase truncate mt-2">{p.ownerName}</p>
+                          <p className="text-[10px] text-slate-400 truncate">{p.barangay || "Dipaculao"}, Dipaculao, Aurora</p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setViewingLedgerProp(p)}
+                          className="w-full bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 font-black text-[10px] uppercase tracking-wider py-2 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-[0.98]"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          View Actual Ledger
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="bg-slate-900/35 border border-slate-800 p-6 rounded-3xl">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
                   <div>
@@ -1227,31 +1671,31 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="border-b border-slate-800 text-[10px] text-slate-500 font-black uppercase tracking-wider h-10">
-                          <th className="pb-3">Property Location / TDN</th>
-                          <th className="pb-3 text-center">Taxable Year</th>
-                          <th className="pb-3 text-right">Basic Tax Due</th>
-                          <th className="pb-3 text-right">SEF Due</th>
-                          <th className="pb-3 text-right">Penalty Surcharge</th>
-                          <th className="pb-3 text-right">Net Amount Due</th>
+                          <th className="pb-3 px-3">Property Location / TDN</th>
+                          <th className="pb-3 px-3 text-center">Taxable Year</th>
+                          <th className="pb-3 px-3 text-right">Basic Tax Due</th>
+                          <th className="pb-3 px-3 text-right">SEF Due</th>
+                          <th className="pb-3 px-3 text-right">Penalty Surcharge</th>
+                          <th className="pb-3 px-3 text-right pr-2">Net Amount Due</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40 text-xs">
-                        {propertyDelinquencies.map(d => {
+                        {groupedPropertyDelinquencies.map(d => {
                           const prop = getDelinquencyProperty(d.propertyId);
                           return (
                             <tr 
                               key={d.id} 
                               className="h-14 hover:bg-slate-900/10 transition-colors"
                             >
-                              <td className="py-2">
+                              <td className="py-2.5 px-3">
                                 <p className="font-bold text-white uppercase">{prop?.tdNumber || "Unknown"}</p>
                                 <p className="text-[10px] text-slate-500">{prop?.barangay || "---"}, Dipaculao, Aurora</p>
                               </td>
-                              <td className="py-2 text-slate-400 font-mono font-bold text-center">{d.year}</td>
-                              <td className="py-2 text-right text-slate-300 font-semibold">{formatCurrency(d.basicTaxDue)}</td>
-                              <td className="py-2 text-right text-slate-300 font-semibold">{formatCurrency(d.sefTaxDue)}</td>
-                              <td className="py-2 text-right text-red-400/80 font-mono font-bold font-mono">+{formatCurrency((d.penalty || 0) + (d.interest || 0))}</td>
-                              <td className="py-2 text-right font-black text-rose-350 text-[13px] font-mono">{formatCurrency(d.totalDue)}</td>
+                              <td className="py-2.5 px-3 text-center text-slate-300 font-mono font-bold">{d.yearDisplay}</td>
+                              <td className="py-2.5 px-3 text-right text-slate-300 font-semibold">{formatCurrency(d.basicTaxDue)}</td>
+                              <td className="py-2.5 px-3 text-right text-slate-300 font-semibold">{formatCurrency(d.sefTaxDue)}</td>
+                              <td className="py-2.5 px-3 text-right text-red-400/80 font-mono font-bold">+{formatCurrency(d.penalty)}</td>
+                              <td className="py-2.5 px-3 text-right font-black text-rose-350 text-[13px] font-mono pr-2">{formatCurrency(d.totalDue)}</td>
                             </tr>
                           );
                         })}
@@ -1305,7 +1749,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                                 <td className="py-2 text-right text-slate-400 font-mono">{formatCurrency(p.penaltyPaid || 0)}</td>
                                 <td className="py-2 text-right font-black text-emerald-400 font-mono">{formatCurrency(p.amountPaid)}</td>
                                 <td className="py-1 text-right pr-2">
-                                  <div className="table-actions">
+                                  <div className="table-actions flex items-center justify-end gap-2">
                                     <button
                                       onClick={() => {
                                         // Render a direct printable view of this receipt
@@ -1397,8 +1841,8 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
 
                       {selectedPropIdForForm && formType === "clearance" && (() => {
                         const selProp = properties.find(p => p.id === selectedPropIdForForm);
-                        const selUnpaid = delinquencies.filter(
-                          d => (d.propertyId === selectedPropIdForForm || (selProp && (d as any).propertyTdn === selProp.tdNumber)) && d.status !== "Paid" && d.status !== "Voided"
+                        const selUnpaid = propertyDelinquencies.filter(
+                          d => d.propertyId === selectedPropIdForForm || (selProp && (d as any).propertyTdn === selProp.tdNumber)
                         );
                         if (selUnpaid.length > 0) {
                           return (
@@ -1839,6 +2283,39 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                 </h3>
 
                 <div className="space-y-4">
+                  {/* SUPABASE RECORDED NOTIFICATIONS */}
+                  {supabaseNotifs.length > 0 && (
+                    <div className="space-y-3 mb-6">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase text-red-400 tracking-widest font-mono flex items-center gap-1.5">
+                          <Bell className="w-3.5 h-3.5 text-red-400" />
+                          Supabase Database Notifications ({supabaseNotifs.length})
+                        </span>
+                        <span className="text-[9px] text-slate-500 font-mono">Linked to Taxpayer Account</span>
+                      </div>
+                      {supabaseNotifs.map((sn) => (
+                        <div key={sn.id} className="p-5 bg-gradient-to-r from-red-950/30 to-slate-950 border border-red-500/30 rounded-2xl space-y-2 hover:border-red-500/50 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-[9px] font-bold uppercase rounded border border-red-500/30">
+                              {sn.type || "Archival Notice"}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {sn.created_at ? new Date(sn.created_at).toLocaleString() : "Recent"}
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-black text-white">{sn.title}</h4>
+                          <p className="text-xs text-slate-300 leading-relaxed font-sans">{sn.message}</p>
+                          {sn.reason && (
+                            <div className="p-2.5 bg-slate-900/80 border border-amber-500/20 rounded-xl text-[11px] text-amber-200/90 font-mono">
+                              <span className="text-amber-400 font-bold block mb-0.5">Assessor Remarks:</span>
+                              "{sn.reason}"
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {notifications.map(n => (
                     <div key={n.id} className="p-5 bg-slate-950/50 border border-slate-800/80 rounded-2xl flex gap-4 items-start hover:border-slate-700 transition-colors">
                       <div className={`p-2 rounded-xl mt-0.5 ${
@@ -2225,6 +2702,17 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
             </form>
           </div>
         </div>
+      )}
+
+      {/* VIEW-ONLY RPTAR LEDGER MODAL */}
+      {viewingLedgerProp && (
+        <RPTARPrintView
+          property={viewingLedgerProp}
+          history={propertyDelinquencies.filter(d => d.propertyId === viewingLedgerProp.id || (d as any).propertyTdn === viewingLedgerProp.tdNumber)}
+          payments={payments.filter(p => p.propertyId === viewingLedgerProp.id)}
+          onClose={() => setViewingLedgerProp(null)}
+          viewOnly={true}
+        />
       )}
     </div>
   );

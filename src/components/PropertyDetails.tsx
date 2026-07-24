@@ -61,7 +61,7 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, on
   }, [property.id]);
 
   const totalOutstanding = history
-    .filter(d => d.status === "Delinquent" && !payments.some(p => p.taxYear === d.year && p.status === "Active"))
+    .filter(d => d.status === "Delinquent" && d.year < 2027 && !payments.some(p => p.taxYear === d.year && p.status === "Active"))
     .reduce((acc, curr) => acc + calculateTotalDue(curr.basicTaxDue, curr.sefTaxDue, curr.year).totalDue, 0);
 
   const totalPaymentsMade = payments

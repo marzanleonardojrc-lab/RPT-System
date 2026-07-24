@@ -132,7 +132,7 @@ USING (
 );
 
 -- POLICY: Taxpayer Access
--- Taxpayers can only read active properties that are bound to their linked_property_ids array.
+-- Taxpayers can only read active properties that are bound to their linked_property_ids array or account credentials.
 CREATE POLICY "policy_properties_taxpayer_select_own" 
 ON public.properties FOR SELECT 
 TO authenticated
@@ -141,7 +141,15 @@ USING (
         SELECT 1 FROM public.users 
         WHERE users.uid = auth.uid()::text 
         AND users.role IN ('Taxpayer', 'Resident')
-        AND (properties.id = ANY(users.linked_property_ids) OR properties.pin = ANY(users.linked_property_ids))
+        AND (
+            properties.id = ANY(users.linked_property_ids) 
+            OR properties.pin = ANY(users.linked_property_ids)
+            OR properties.td_number = ANY(users.linked_property_ids)
+            OR properties.user_id = auth.uid()::text
+            OR properties.taxpayer_id = auth.uid()::text
+            OR properties.owner_email = users.email
+            OR properties.taxpayer_email = users.email
+        )
         AND users.status = 'Approved'
     )
 );

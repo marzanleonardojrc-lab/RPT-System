@@ -20,7 +20,7 @@ import { addToOfflineQueue } from "../lib/offlineSync";
 import { Property, PropertyClassification, Delinquency } from "../types";
 import { cn, formatCurrency } from "../lib/utils";
 import { DIPACULAO_BARANGAYS } from "../constants";
-import { Plus, Search, Filter, Edit2, Check, X, Building2, Upload, Eye, ChevronDown, ChevronRight, Receipt, Trash2, RotateCcw, RefreshCw } from "lucide-react";
+import { Plus, Search, Filter, Edit2, Check, X, Building2, Upload, Eye, ChevronDown, ChevronRight, Receipt, Trash2, RotateCcw, RefreshCw, Archive, History, User, Clock, MessageSquare, AlertTriangle, FileText, Shield } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { logAudit } from "../lib/audit";
 import ExcelImporter from "./ExcelImporter";
@@ -29,6 +29,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import DelinquencyActions from "./DelinquencyActions";
 
 import AdminAuthDialog from "./AdminAuthDialog";
+import { sendPropertyArchivalNotification } from "../lib/notifications";
 
 const highlightMatch = (text: string, search: string) => {
   if (!search.trim()) return <span>{text}</span>;
@@ -55,7 +56,7 @@ const highlightMatch = (text: string, search: string) => {
 interface PropertyRegistryProps {
   isEncoder: boolean;
   isAdmin?: boolean;
-  initialTab?: "Active" | "Archived";
+  initialTab?: "Active" | "Archived" | "History";
   showTabsSelector?: boolean;
   onPostPayment?: (prop: Property) => void;
 }
@@ -70,12 +71,13 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
   const { profile } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [delinquencies, setDelinquencies] = useState<Delinquency[]>([]);
+  const [archivalNotices, setArchivalNotices] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBarangay, setSelectedBarangay] = useState<string>("");
   const [isAdding, setIsAdding] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"Active" | "Archived">(initialTab);
+  const [activeTab, setActiveTab] = useState<"Active" | "Archived" | "History">(initialTab);
   const [viewingProperty, setViewingProperty] = useState<Property | null>(null);
   const [adminAuthDialog, setAdminAuthDialog] = useState<{isOpen: boolean, property: Property | null}>({isOpen: false, property: null});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -153,7 +155,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
         });
       }
 
-      const validProps = loadedProps.filter(p => 
+      let validProps = loadedProps.filter(p => 
         p.assessedValue !== undefined && 
         p.assessedValue !== null && 
         String(p.assessedValue || "").trim() !== "" && 
@@ -161,19 +163,91 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
         Number(p.assessedValue) > 0
       );
 
+      // Scoping for Taxpayers/Residents: If logged-in user is not Admin/Encoder, scope properties strictly by account ID/profile
+      const isTaxpayerUser = profile?.role === 'Taxpayer' || profile?.role === 'Resident' || (!isAdminUser && !isEncoder && !isAdmin);
+      if (isTaxpayerUser && profile) {
+        const profileLinks = profile?.linkedPropertyIds || (profile as any)?.linked_property_ids || [];
+        let parsedLinks: string[] = [];
+        if (Array.isArray(profileLinks)) {
+          parsedLinks = profileLinks;
+        } else if (typeof profileLinks === 'string') {
+          try { parsedLinks = JSON.parse(profileLinks); } catch { parsedLinks = [profileLinks]; }
+        }
+
+        const profileUid = profile?.uid ? String(profile.uid).trim().toLowerCase() : "";
+        const profileEmail = profile?.email ? String(profile.email).trim().toLowerCase() : "";
+
+        const normalizeStr = (str?: string) => (str || "").toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
+        const userDisplay = normalizeStr(profile?.displayName || profile?.username);
+
+        validProps = validProps.filter(p => {
+          const isLinkedByProfile = parsedLinks.some(link => {
+            if (!link) return false;
+            const cleanLink = String(link).trim().toLowerCase();
+            const pId = String(p.id).trim().toLowerCase();
+            const pTdn = p.tdNumber ? String(p.tdNumber).trim().toLowerCase() : "";
+            const pPin = p.pin ? String(p.pin).trim().toLowerCase() : "";
+            return cleanLink === pId || (pTdn && cleanLink === pTdn) || (pPin && cleanLink === pPin);
+          });
+
+          const isDirectUserMatch = Boolean(
+            (profileUid && (
+              ((p as any).userId && String((p as any).userId).trim().toLowerCase() === profileUid) ||
+              ((p as any).taxpayerId && String((p as any).taxpayerId).trim().toLowerCase() === profileUid) ||
+              ((p as any).taxpayer_id && String((p as any).taxpayer_id).trim().toLowerCase() === profileUid)
+            )) ||
+            (profileEmail && (
+              ((p as any).taxpayerEmail && String((p as any).taxpayerEmail).trim().toLowerCase() === profileEmail) ||
+              ((p as any).taxpayer_email && String((p as any).taxpayer_email).trim().toLowerCase() === profileEmail) ||
+              ((p as any).ownerEmail && String((p as any).ownerEmail).trim().toLowerCase() === profileEmail)
+            ))
+          );
+
+          const propOwner = normalizeStr(p.ownerName);
+          let matchesOwnerName = false;
+          if (propOwner && userDisplay) {
+            if (propOwner.includes(userDisplay) || userDisplay.includes(propOwner)) {
+              matchesOwnerName = true;
+            } else {
+              const userTokens = userDisplay.split(/\s+/).filter(t => t.length >= 3);
+              if (userTokens.length > 0) {
+                const matchedTokens = userTokens.filter(token => propOwner.includes(token));
+                if (matchedTokens.length >= Math.min(2, userTokens.length)) {
+                  matchesOwnerName = true;
+                }
+              }
+            }
+          }
+
+          return isLinkedByProfile || isDirectUserMatch || matchesOwnerName;
+        });
+      }
+
       setProperties(validProps);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "properties");
     });
-  }, [profile]);
+  }, [profile, isEncoder, isAdmin]);
 
   useEffect(() => {
     const q = query(collection(db, "delinquencies"));
-    return onSnapshot(q, (snapshot) => {
+    const unsubDelinq = onSnapshot(q, (snapshot) => {
       setDelinquencies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Delinquency)));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, "delinquencies");
     });
+
+    const qNotices = query(collection(db, "property_archival_notices"));
+    const unsubNotices = onSnapshot(qNotices, (snapshot) => {
+      setArchivalNotices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.warn("Failed to subscribe to property_archival_notices:", error);
+    });
+
+    return () => {
+      unsubDelinq();
+      unsubNotices();
+    };
   }, []);
 
   const handleSave = async () => {
@@ -404,6 +478,13 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
         reason: reason,
         archivedBy: profile?.displayName || profile?.email || "Municipal Assessor Administrator",
         archivedAt: new Date().toISOString()
+      });
+
+      // 3. Dispatch to Supabase 'notifications' table & trigger live taxpayer portal toast notification
+      await sendPropertyArchivalNotification({
+        property,
+        reason,
+        archivedBy: profile?.displayName || profile?.email || "Municipal Assessor Administrator"
       });
     } catch (err) {
       console.error("Failed to post taxpayer property archival notification:", err);
@@ -655,14 +736,95 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
     return [...exactMatches, ...partialTdMatches, ...otherPartialMatches];
   }, [properties, searchTerm, activeTab, selectedBarangay]);
 
+  const archiveHistoryList = React.useMemo(() => {
+    const map = new Map<string, {
+      id: string;
+      propertyId?: string;
+      tdNumber: string;
+      pin: string;
+      ownerName: string;
+      barangay: string;
+      archivedBy: string;
+      archivedAt: string;
+      archiveReason: string;
+      isPermanentlyDeleted?: boolean;
+      property?: Property;
+    }>();
+
+    // 1. All archived properties from properties state
+    properties.filter(p => p.isArchived).forEach(p => {
+      const key = p.tdNumber || p.id;
+      map.set(key, {
+        id: p.id,
+        propertyId: p.id,
+        tdNumber: p.tdNumber || "N/A",
+        pin: p.pin || "N/A",
+        ownerName: p.ownerName || "Unrecorded Owner",
+        barangay: p.barangay || "N/A",
+        archivedBy: p.archivedBy || p.recordedBy || "Municipal Assessor / Admin",
+        archivedAt: p.archivedAt || p.updatedAt?.toString() || new Date().toISOString(),
+        archiveReason: p.archiveReason || "Property record archived or reassessed",
+        isPermanentlyDeleted: (p as any).isPermanentlyDeleted || false,
+        property: p
+      });
+    });
+
+    // 2. Overlay or add from archival notices
+    archivalNotices.forEach(notice => {
+      const key = notice.tdNumber || notice.id;
+      if (!map.has(key)) {
+        map.set(key, {
+          id: notice.id,
+          propertyId: notice.propertyId,
+          tdNumber: notice.tdNumber || "N/A",
+          pin: notice.pin || "N/A",
+          ownerName: notice.ownerName || "Unrecorded Owner",
+          barangay: notice.barangay || "N/A",
+          archivedBy: notice.archivedBy || "Municipal Assessor",
+          archivedAt: notice.archivedAt || new Date().toISOString(),
+          archiveReason: notice.reason || "Property record archived",
+          isPermanentlyDeleted: true
+        });
+      } else {
+        const existing = map.get(key)!;
+        if (notice.reason && (!existing.archiveReason || existing.archiveReason.includes("reassessed"))) {
+          existing.archiveReason = notice.reason;
+        }
+        if (notice.archivedBy) existing.archivedBy = notice.archivedBy;
+        if (notice.archivedAt) existing.archivedAt = notice.archivedAt;
+      }
+    });
+
+    let list = Array.from(map.values());
+
+    if (selectedBarangay) {
+      list = list.filter(item => item.barangay === selectedBarangay);
+    }
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.trim().toLowerCase();
+      list = list.filter(item => 
+        item.tdNumber.toLowerCase().includes(term) ||
+        item.pin.toLowerCase().includes(term) ||
+        item.ownerName.toLowerCase().includes(term) ||
+        item.barangay.toLowerCase().includes(term) ||
+        item.archivedBy.toLowerCase().includes(term) ||
+        item.archiveReason.toLowerCase().includes(term)
+      );
+    }
+
+    list.sort((a, b) => new Date(b.archivedAt).getTime() - new Date(a.archivedAt).getTime());
+    return list;
+  }, [properties, archivalNotices, selectedBarangay, searchTerm]);
+
   return (
     <div className="space-y-6">
       <ConfirmDialog 
         isOpen={confirmDialog.isOpen}
         onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmDialog.onConfirm}
         title={confirmDialog.title}
         message={confirmDialog.message}
+        onConfirm={confirmDialog.onConfirm}
         type={confirmDialog.type}
         showInput={confirmDialog.showInput}
         inputPlaceholder={confirmDialog.inputPlaceholder}
@@ -681,15 +843,21 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
             <span>Assessment & Property Management</span>
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            {activeTab === 'Archived' ? "Property Archive" : "Property Registry"}
+            {activeTab === 'History' 
+              ? "Property Archive History & Audit" 
+              : activeTab === 'Archived' 
+                ? "Property Archive" 
+                : "Property Registry"}
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            {activeTab === 'Archived' 
-              ? "Repository for archived and inactive real property units and tax declaration records." 
-              : "Central database for registered real property units, tax declarations, and PIN references."}
+            {activeTab === 'History'
+              ? "Comprehensive audit log of all archived properties, including executing personnel, timestamps, and required remarks."
+              : activeTab === 'Archived' 
+                ? "Repository for archived and inactive real property units and tax declaration records." 
+                : "Central database for registered real property units, tax declarations, and PIN references."}
           </p>
         </div>
-        {activeTab !== 'Archived' && isEncoder && !isAdding && (
+        {activeTab === 'Active' && isEncoder && !isAdding && (
           <div className="flex items-center gap-3 shrink-0">
              <button 
               onClick={() => setIsImporting(true)}
@@ -714,34 +882,48 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
         <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex flex-col md:flex-row justify-between md:items-center gap-4">
           {showTabsSelector ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => setActiveTab('Active')}
                 className={cn(
-                  "px-4 py-2 rounded-xl text-sm font-bold transition-all",
+                  "px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
                   activeTab === 'Active' 
                     ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
                     : "bg-slate-800 text-slate-400 hover:text-slate-200"
                 )}
               >
+                <Building2 className="w-4 h-4" />
                 Active
               </button>
               <button
                 onClick={() => setActiveTab('Archived')}
                 className={cn(
-                  "px-4 py-2 rounded-xl text-sm font-bold transition-all",
+                  "px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
                   activeTab === 'Archived' 
                     ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
                     : "bg-slate-800 text-slate-400 hover:text-slate-200"
                 )}
               >
+                <Archive className="w-4 h-4" />
                 Archive
+              </button>
+              <button
+                onClick={() => setActiveTab('History')}
+                className={cn(
+                  "px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+                  activeTab === 'History' 
+                    ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
+                    : "bg-slate-800 text-slate-400 hover:text-slate-200"
+                )}
+              >
+                <History className="w-4 h-4" />
+                Archive History
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-xs uppercase tracking-widest text-slate-500 font-bold">
-                {activeTab === 'Active' ? 'Active Properties' : 'Archived Properties'}
+                {activeTab === 'Active' ? 'Active Properties' : activeTab === 'Archived' ? 'Archived Properties' : 'Archive History Log'}
               </span>
             </div>
           )}
@@ -750,7 +932,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
               <input 
                 type="text" 
-                placeholder="Search by Tax Dec, PIN, Owner, or Barangay..." 
+                placeholder={activeTab === 'History' ? "Search history by TDN, owner, user, or remarks..." : "Search by Tax Dec, PIN, Owner, or Barangay..."} 
                 className="w-full pl-10 pr-4 py-2 border border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-950 text-slate-300 text-sm transition-all"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
@@ -776,123 +958,237 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-950/50">
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Entity Signature</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ownership Block</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Barangay</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Assessment</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {sortedAndFiltered.map(property => {
-                const latestDelinq = delinquencies.filter(d => d.propertyId === property.id).sort((a,b) => b.year - a.year)[0];
-                const exactTd = (property as any).exactTd;
-                const exactPin = (property as any).exactPin;
-                const exactOwner = (property as any).exactOwner;
-                const isPartialTd = (property as any).isPartialTd;
-                const isExact = exactTd || exactPin || exactOwner;
-                return (
-                <tr key={property.id} className={cn("transition-colors group", isExact ? "bg-amber-500/10 hover:bg-amber-500/20" : isPartialTd ? "bg-amber-500/[0.03] hover:bg-amber-500/[0.08]" : "hover:bg-blue-500/[0.02]")}>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className={cn("p-2 rounded-xl border transition-all", isExact ? "bg-amber-500/20 border-amber-500/30 group-hover:bg-amber-500/30" : isPartialTd ? "bg-amber-500/10 border-amber-500/20" : "bg-slate-800 group-hover:bg-slate-700 border-slate-700 group-hover:border-slate-600")}>
-                        <Building2 className={cn("w-4 h-4", (isExact || isPartialTd) ? "text-amber-500" : "text-blue-400")} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-mono text-xs font-bold text-white tracking-tight">
-                            {exactTd ? (
-                              <span className="bg-amber-500/20 text-amber-500 px-1 rounded">{property.tdNumber}</span>
-                            ) : isPartialTd ? (
-                              highlightMatch(property.tdNumber, searchTerm)
-                            ) : (
-                              property.tdNumber
+            {activeTab === 'History' ? (
+              <>
+                <thead>
+                  <tr className="bg-slate-950/80 border-b border-slate-800">
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Archived Property Record</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Action Executed By</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Archival Timestamp</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Required Remarks / Reason</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80">
+                  {archiveHistoryList.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-slate-500 text-sm">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <History className="w-8 h-8 text-slate-600 mb-1" />
+                          <p className="font-bold text-slate-400">No Archive History Logs Found</p>
+                          <p className="text-xs text-slate-500">No properties have been archived or deleted matching your criteria.</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    archiveHistoryList.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl shrink-0">
+                              <Archive className="w-4 h-4 text-amber-400" />
+                            </div>
+                            <div>
+                              <p className="font-mono text-xs font-bold text-white tracking-tight">
+                                TD: {item.tdNumber}
+                              </p>
+                              <p className="text-xs font-semibold text-slate-200">
+                                {item.ownerName}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-mono">
+                                Brgy. {item.barangay} • PIN: {item.pin}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4 text-xs">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-[10px] shrink-0">
+                              <User className="w-3.5 h-3.5" />
+                            </div>
+                            <div>
+                              <span className="font-bold text-slate-200 block">{item.archivedBy}</span>
+                              <span className="text-[9px] uppercase tracking-wider text-blue-400 font-mono font-bold">Authorized Assessor</span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4 text-xs font-mono text-slate-300 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5 text-slate-300">
+                            <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>
+                              {item.archivedAt ? new Date(item.archivedAt).toLocaleString('en-US', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              }) : "N/A"}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4 text-xs">
+                          <div className="p-2.5 bg-slate-950/80 border border-amber-500/20 rounded-xl space-y-1 max-w-md">
+                            <div className="flex items-center gap-1.5 text-amber-400 font-bold text-[10px] uppercase tracking-wider">
+                              <MessageSquare className="w-3 h-3 shrink-0" />
+                              Mandatory Deletion Remarks:
+                            </div>
+                            <p className="text-amber-200/90 text-xs italic font-sans leading-relaxed">
+                              "{item.archiveReason}"
+                            </p>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-2">
+                            {item.property && (
+                              <button
+                                onClick={() => handleRestoreProperty(item.property!)}
+                                className="btn-action-positive"
+                                title="Restore Property Record"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" /> Restore
+                              </button>
                             )}
-                          </p>
-                          {(exactTd || exactPin) && (
+                            {item.property && (
+                              <button
+                                onClick={() => setViewingProperty(item.property!)}
+                                className="btn-action-primary"
+                                title="View Property RPTAR Record"
+                              >
+                                <Eye className="w-3.5 h-3.5" /> Details
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </>
+            ) : (
+              <>
+                <thead>
+                  <tr className="bg-slate-950/50">
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Entity Signature</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ownership Block</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Barangay</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Assessment</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {sortedAndFiltered.map(property => {
+                    const latestDelinq = delinquencies.filter(d => d.propertyId === property.id).sort((a,b) => b.year - a.year)[0];
+                    const exactTd = (property as any).exactTd;
+                    const exactPin = (property as any).exactPin;
+                    const exactOwner = (property as any).exactOwner;
+                    const isPartialTd = (property as any).isPartialTd;
+                    const isExact = exactTd || exactPin || exactOwner;
+                    return (
+                    <tr key={property.id} className={cn("transition-colors group", isExact ? "bg-amber-500/10 hover:bg-amber-500/20" : isPartialTd ? "bg-amber-500/[0.03] hover:bg-amber-500/[0.08]" : "hover:bg-blue-500/[0.02]")}>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={cn("p-2 rounded-xl border transition-all", isExact ? "bg-amber-500/20 border-amber-500/30 group-hover:bg-amber-500/30" : isPartialTd ? "bg-amber-500/10 border-amber-500/20" : "bg-slate-800 group-hover:bg-slate-700 border-slate-700 group-hover:border-slate-600")}>
+                            <Building2 className={cn("w-4 h-4", (isExact || isPartialTd) ? "text-amber-500" : "text-blue-400")} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-mono text-xs font-bold text-white tracking-tight">
+                                {exactTd ? (
+                                  <span className="bg-amber-500/20 text-amber-500 px-1 rounded">{property.tdNumber}</span>
+                                ) : isPartialTd ? (
+                                  highlightMatch(property.tdNumber, searchTerm)
+                                ) : (
+                                  property.tdNumber
+                                )}
+                              </p>
+                              {(exactTd || exactPin) && (
+                                <span className="px-1.5 py-0.5 bg-amber-500 text-slate-900 rounded-[4px] text-[8px] font-bold uppercase tracking-widest shadow-sm shadow-amber-500/20 flex-shrink-0">Exact Match</span>
+                              )}
+                              {!exactTd && !exactPin && isPartialTd && (
+                                <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-[4px] text-[8px] font-bold uppercase tracking-widest flex-shrink-0">TD Match</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">{property.classification} <span className="text-slate-700 mx-1">•</span> PIN: {property.pin}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm font-semibold text-slate-200">
+                        <div className="flex items-center gap-2">
+                          <span>{exactOwner ? <span className="bg-amber-500/20 text-amber-500 px-1 rounded">{property.ownerName}</span> : property.ownerName}</span>
+                          {exactOwner && (
                             <span className="px-1.5 py-0.5 bg-amber-500 text-slate-900 rounded-[4px] text-[8px] font-bold uppercase tracking-widest shadow-sm shadow-amber-500/20 flex-shrink-0">Exact Match</span>
                           )}
-                          {!exactTd && !exactPin && isPartialTd && (
-                            <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-[4px] text-[8px] font-bold uppercase tracking-widest flex-shrink-0">TD Match</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-400">{property.barangay}</td>
+                      <td className="px-6 py-4 text-sm font-bold text-emerald-400">{formatCurrency(property.assessedValue)}</td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="table-actions">
+                          {activeTab === 'Active' ? (
+                            <>
+                              <button 
+                                onClick={() => setViewingProperty(property)}
+                                className="btn-action-primary"
+                                title="View RPTAR"
+                              >
+                                <Eye className="w-4 h-4" /> View
+                              </button>
+                              {isEncoder && (
+                                <button 
+                                  onClick={() => {
+                                    setEditingId(property.id);
+                                    setFormData(property);
+                                    setIsAdding(true);
+                                  }}
+                                  className="btn-action-primary"
+                                  title="Modify Record"
+                                >
+                                  <Edit2 className="w-4 h-4" /> Edit
+                                </button>
+                              )}
+                              {isAdmin && (
+                                <button 
+                                  onClick={() => handleDeleteProperty(property)}
+                                  className="btn-action-destructive"
+                                  title="Archive Property"
+                                >
+                                  <Trash2 className="w-4 h-4" /> Archive
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <button 
+                                onClick={() => handleRestoreProperty(property)}
+                                className="btn-action-positive"
+                                title="Restore Property"
+                              >
+                                <RefreshCw className="w-4 h-4" /> Restore
+                              </button>
+                              {isAdmin && (
+                                <button 
+                                  onClick={() => handleDeleteProperty(property)}
+                                  className="btn-action-destructive"
+                                  title="Permanently Delete"
+                                >
+                                  <Trash2 className="w-4 h-4" /> Delete
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">{property.classification} <span className="text-slate-700 mx-1">•</span> PIN: {property.pin}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-semibold text-slate-200">
-                    <div className="flex items-center gap-2">
-                      <span>{exactOwner ? <span className="bg-amber-500/20 text-amber-500 px-1 rounded">{property.ownerName}</span> : property.ownerName}</span>
-                      {exactOwner && (
-                        <span className="px-1.5 py-0.5 bg-amber-500 text-slate-900 rounded-[4px] text-[8px] font-bold uppercase tracking-widest shadow-sm shadow-amber-500/20 flex-shrink-0">Exact Match</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-400">{property.barangay}</td>
-                  <td className="px-6 py-4 text-sm font-bold text-emerald-400">{formatCurrency(property.assessedValue)}</td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="table-actions">
-                      {activeTab === 'Active' ? (
-                        <>
-                          <button 
-                            onClick={() => setViewingProperty(property)}
-                            className="btn-action-primary"
-                            title="View RPTAR"
-                          >
-                            <Eye className="w-4 h-4" /> View
-                          </button>
-                          {isEncoder && (
-                            <button 
-                              onClick={() => {
-                                setEditingId(property.id);
-                                setFormData(property);
-                                setIsAdding(true);
-                              }}
-                              className="btn-action-primary"
-                              title="Modify Record"
-                            >
-                              <Edit2 className="w-4 h-4" /> Edit
-                            </button>
-                          )}
-                          {isAdmin && (
-                            <button 
-                              onClick={() => handleDeleteProperty(property)}
-                              className="btn-action-destructive"
-                              title="Archive Property"
-                            >
-                              <Trash2 className="w-4 h-4" /> Archive
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <button 
-                            onClick={() => handleRestoreProperty(property)}
-                            className="btn-action-positive"
-                            title="Restore Property"
-                          >
-                            <RefreshCw className="w-4 h-4" /> Restore
-                          </button>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => handleDeleteProperty(property)}
-                              className="btn-action-destructive"
-                              title="Permanently Delete"
-                            >
-                              <Trash2 className="w-4 h-4" /> Delete
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )})}
-            </tbody>
+                      </td>
+                    </tr>
+                  )})}
+                </tbody>
+              </>
+            )}
           </table>
         </div>
       </div>

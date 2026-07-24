@@ -201,3 +201,20 @@ export interface TaxpayerRequest {
   createdAt: string;
   updatedAt?: string;
 }
+
+export interface SupabaseNotification {
+  id: string;
+  taxpayer_id: string;
+  taxpayer_email?: string;
+  taxpayer_name?: string;
+  property_id?: string;
+  td_number?: string;
+  pin?: string;
+  title: string;
+  message: string;
+  type: string;
+  reason?: string;
+  archived_by?: string;
+  read: boolean;
+  created_at: string;
+}

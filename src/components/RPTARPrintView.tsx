@@ -3,13 +3,14 @@ import { createPortal } from "react-dom";
 import { Property, Delinquency, Payment } from "../types";
 import { groupDelinquenciesByPenaltyRule, calculateTotalDue } from "../lib/taxCalculations";
 import { formatDate, resolveModernColors } from "../lib/utils";
-import { Download } from "lucide-react";
+import { Download, Eye, X } from "lucide-react";
 
 interface RPTARPrintViewProps {
   property: Property;
   history: Delinquency[];
   payments: Payment[];
   onClose: () => void;
+  viewOnly?: boolean;
 }
 
 export const RPTARPrintView: React.FC<RPTARPrintViewProps> = ({
@@ -17,6 +18,7 @@ export const RPTARPrintView: React.FC<RPTARPrintViewProps> = ({
   history,
   payments,
   onClose,
+  viewOnly = false,
 }) => {
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const printAreaRef = useRef<HTMLDivElement>(null);
@@ -437,41 +439,57 @@ export const RPTARPrintView: React.FC<RPTARPrintViewProps> = ({
           height: 24px !important;
           vertical-align: middle !important;
         }
+        ${viewOnly ? `
+          @media print {
+            body { display: none !important; }
+          }
+        ` : ''}
       ` }} />
 
       {/* Control Navigation Header */}
-      <div className="sticky top-0 bg-slate-100 border-b border-slate-300 p-4 flex justify-between items-center no-print z-10 font-sans">
+      <div className="sticky top-0 bg-slate-900 text-white border-b border-slate-800 p-4 flex justify-between items-center no-print z-10 font-sans shadow-md">
         <div className="flex items-center gap-4">
           <button 
             id="rptar-back-btn"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-medium transition-colors cursor-pointer"
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center gap-2 border border-slate-700"
           >
-            Back to Application
+            <X className="w-4 h-4 text-slate-300" />
+            Close Ledger
           </button>
-          <span className="text-sm font-semibold text-slate-600">
-            Print Preview: Ensure Paper Size is set to "8.5 x 13" or "Legal" with Landscape orientation in Print Dialog.
+          <span className="text-xs font-semibold text-slate-300 flex items-center gap-2 bg-slate-950/60 px-3 py-1.5 rounded-xl border border-slate-800">
+            {viewOnly ? (
+              <>
+                <Eye className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-amber-300 font-bold uppercase tracking-wide">View-Only Mode</span>
+                <span className="text-slate-400 text-[11px]">— Official Real Property Tax Account Register (Printing and PDF export disabled)</span>
+              </>
+            ) : (
+              "Print Preview: Ensure Paper Size is set to '8.5 x 13' or 'Legal' with Landscape orientation in Print Dialog."
+            )}
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleSavePDF}
-            disabled={isSavingPdf}
-            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 disabled:bg-slate-100 disabled:text-slate-400 text-slate-800 rounded font-medium transition-colors cursor-pointer flex items-center gap-2"
-            title="Saves document as a PDF file"
-          >
-            <Download className="w-4 h-4" />
-            {isSavingPdf ? "Saving PDF..." : "Save PDF"}
-          </button>
-          <button 
-            id="rptar-print-btn"
-            onClick={handlePrint}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors shadow-sm cursor-pointer"
-          >
-            Print Document
-          </button>
-        </div>
+        {!viewOnly && (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSavePDF}
+              disabled={isSavingPdf}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 text-white rounded-xl font-medium text-xs transition-colors cursor-pointer flex items-center gap-2 border border-slate-700"
+              title="Saves document as a PDF file"
+            >
+              <Download className="w-4 h-4" />
+              {isSavingPdf ? "Saving PDF..." : "Save PDF"}
+            </button>
+            <button 
+              id="rptar-print-btn"
+              onClick={handlePrint}
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs transition-colors shadow-sm cursor-pointer"
+            >
+              Print Document
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Folio Document Frame */}
