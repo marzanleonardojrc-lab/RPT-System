@@ -16,20 +16,32 @@ import {
   writeBatch
 } from "../lib/firebase";
 import { UserProfile, UserRole, Property } from "../types";
-import { initializeApp, getApps } from "firebase/app";
-import { getAuth as getSecondaryAuth, createUserWithEmailAndPassword as createSecondaryUserWithEmail } from "firebase/auth";
-import firebaseConfig from "../../firebase-applet-config.json";
-import { Shield, User, Check, X, Lock, Save, Loader2, AlertCircle, UserPlus, Eye, EyeOff, Sun, Moon } from "lucide-react";
+import { Shield, User, Check, X, Lock, Save, Loader2, AlertCircle, UserPlus, Eye, EyeOff, Sun, Moon, Database, Download, Building2, UserCheck } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
+import { isSupabaseConfigured } from "../lib/supabase";
 import { logAudit } from "../lib/audit";
 import ConfirmDialog from "./ConfirmDialog";
 import { useAuth } from "../AuthContext";
 import { motion, AnimatePresence } from "motion/react";
 import { toISODateSafe } from "../lib/utils";
+import { exportDatabaseToCSV, exportFullDatabaseToJSON } from "../lib/export-helpers";
 
 const Settings: React.FC = () => {
   const { profile, updateUserName, updateUserUsername, updateUserPassword } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [activeSubTab, setActiveSubTab] = useState<"active" | "pending" | "provision">("active");
+  const [activeSubTab, setActiveSubTab] = useState<"active" | "pending" | "staff" | "provision">("active");
+  
+  // Staff registration module states
+  const [staffFullName, setStaffFullName] = useState("");
+  const [staffEmail, setStaffEmail] = useState("");
+  const [staffUsername, setStaffUsername] = useState("");
+  const [staffPassword, setStaffPassword] = useState("StaffPass123!");
+  const [staffRole, setStaffRole] = useState<UserRole>("User");
+  const [staffDesignation, setStaffDesignation] = useState("Treasury Tax Encoder");
+  const [staffStatus, setStaffStatus] = useState<"Approved" | "Pending">("Approved");
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [staffError, setStaffError] = useState<string | null>(null);
+  const [staffSuccess, setStaffSuccess] = useState<string | null>(null);
   
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     return (localStorage.getItem("theme") as "dark" | "light") || "dark";
@@ -43,15 +55,33 @@ const Settings: React.FC = () => {
     } else {
       document.documentElement.classList.remove("light");
     }
+    window.dispatchEvent(new CustomEvent("theme-changed", { detail: { theme: newTheme } }));
   };
+
+  useEffect(() => {
+    const handleThemeEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ theme: "dark" | "light" }>;
+      if (customEvent.detail?.theme) {
+        setTheme(customEvent.detail.theme);
+      }
+    };
+    window.addEventListener("theme-changed", handleThemeEvent);
+    return () => {
+      window.removeEventListener("theme-changed", handleThemeEvent);
+    };
+  }, []);
   
   // Remove security form from settings
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
     message: string;
-    onConfirm: () => void;
+    onConfirm: (reason?: string) => void;
     type?: "danger" | "warning" | "info" | "success";
+    showInput?: boolean;
+    inputPlaceholder?: string;
+    inputLabel?: string;
+    requiredInput?: boolean;
   }>({
     isOpen: false,
     title: "",
@@ -71,6 +101,61 @@ const Settings: React.FC = () => {
   const [provSuccess, setProvSuccess] = useState<string | null>(null);
   const [provLoading, setProvLoading] = useState(false);
 
+  const [isExporting, setIsExporting] = useState(false);
+  const [isExportingJSON, setIsExportingJSON] = useState(false);
+
+  const handleExportCSV = async () => {
+    setIsExporting(true);
+    try {
+      await exportDatabaseToCSV();
+      await logAudit("EXPORT", "PropertyDatabase", "ALL", null, { format: "CSV", recipient: profile?.email });
+      setConfirmDialog({
+        isOpen: true,
+        title: "Export Completed",
+        message: "The property database records have been successfully fetched from the primary server, compiled, and downloaded as a CSV backup file.",
+        type: "success",
+        onConfirm: () => {}
+      });
+    } catch (err: any) {
+      console.error("Export Error:", err);
+      setConfirmDialog({
+        isOpen: true,
+        title: "Export Failed",
+        message: err.message || "An error occurred while compiling the central database records.",
+        type: "danger",
+        onConfirm: () => {}
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportJSON = async () => {
+    setIsExportingJSON(true);
+    try {
+      await exportFullDatabaseToJSON();
+      await logAudit("EXPORT", "FullDatabase", "ALL", null, { format: "JSON", recipient: profile?.email });
+      setConfirmDialog({
+        isOpen: true,
+        title: "Full Backup Completed",
+        message: "All database tables (properties, payments, delinquencies, audit logs, users) have been compiled and exported into a full JSON backup file.",
+        type: "success",
+        onConfirm: () => {}
+      });
+    } catch (err: any) {
+      console.error("JSON Export Error:", err);
+      setConfirmDialog({
+        isOpen: true,
+        title: "Export Failed",
+        message: err.message || "An error occurred while compiling the full database snapshot.",
+        type: "danger",
+        onConfirm: () => {}
+      });
+    } finally {
+      setIsExportingJSON(false);
+    }
+  };
+
   const currentCleanUsername = provUsername.trim().toLowerCase().replace(/\s+/g, "");
   const existingResidentUser = users.find(u => 
     (u.username && u.username.toLowerCase() === currentCleanUsername) ||
@@ -88,17 +173,27 @@ const Settings: React.FC = () => {
 
   // Secondary auth helper to create user without logging out the administrator
   const createSecondaryUser = async (email: string, pass: string): Promise<string> => {
-    let secondaryApp;
-    const existingApps = getApps();
-    const secondaryName = "secondaryAppProvision";
-    secondaryApp = existingApps.find(app => app.name === secondaryName);
-    if (!secondaryApp) {
-      secondaryApp = initializeApp(firebaseConfig, secondaryName);
+    if (!isSupabaseConfigured) {
+      return `mock-user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     }
-    const secondaryAuth = getSecondaryAuth(secondaryApp);
-    const userCredential = await createSecondaryUserWithEmail(secondaryAuth, email, pass);
-    await secondaryAuth.signOut();
-    return userCredential.user.uid;
+    const rawUrl = (import.meta.env.VITE_SUPABASE_URL as string) || (import.meta.env.SUPABASE_URL as string) || '';
+    const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || (import.meta.env.SUPABASE_ANON_KEY as string) || '';
+    try {
+      const secondarySupabase = createClient(rawUrl, rawKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      });
+      const { data, error } = await secondarySupabase.auth.signUp({ email, password: pass });
+      if (error) throw error;
+      if (!data.user) throw new Error("Failed to provision secondary user.");
+      return data.user.id;
+    } catch (err) {
+      console.warn("Secondary user creation via Supabase failed, generating local mock UID:", err);
+      return `mock-user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    }
   };
 
   const handleSelectProperty = (prop: Property) => {
@@ -232,6 +327,135 @@ const Settings: React.FC = () => {
     }
   };
 
+  const handleStaffRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffError(null);
+    setStaffSuccess(null);
+
+    const cleanName = staffFullName.trim();
+    if (!cleanName) {
+      setStaffError("Full Name is required for staff account registration.");
+      return;
+    }
+
+    const cleanUsername = staffUsername.trim().toLowerCase().replace(/\s+/g, "");
+    if (cleanUsername.length < 3) {
+      setStaffError("Username must be at least 3 characters long.");
+      return;
+    }
+
+    if (staffPassword.length < 6) {
+      setStaffError("Initial password must be at least 6 characters long.");
+      return;
+    }
+
+    setStaffLoading(true);
+    try {
+      const emailToUse = staffEmail.trim() ? staffEmail.trim() : `${cleanUsername}@rpt.dipaculao.gov`;
+
+      // Check username conflict in user_mappings
+      const q = query(collection(db, "user_mappings"), where("username", "==", cleanUsername));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        throw new Error(`Username "@${cleanUsername}" is already assigned to another profile. Please specify a unique username.`);
+      }
+
+      // Check existing user in memory state
+      const existing = users.find(u => 
+        (u.username && u.username.toLowerCase() === cleanUsername) ||
+        (u.email && u.email.toLowerCase() === emailToUse.toLowerCase())
+      );
+      if (existing) {
+        throw new Error(`An account with username "@${cleanUsername}" or email "${emailToUse}" already exists.`);
+      }
+
+      // Create secondary authentication credential
+      const uid = await createSecondaryUser(emailToUse, staffPassword);
+
+      // Construct UserProfile
+      const newStaffProfile: UserProfile = {
+        uid: uid,
+        email: emailToUse,
+        username: cleanUsername,
+        displayName: cleanName,
+        role: staffRole,
+        status: staffStatus as any,
+        createdAt: new Date().toISOString(),
+        designation: staffDesignation,
+        requiresPasswordReset: true
+      };
+
+      // Save to Firestore
+      await setDoc(doc(db, "users", uid), newStaffProfile);
+
+      // Save routing mapping
+      await setDoc(doc(db, "user_mappings", cleanUsername), {
+        username: cleanUsername,
+        email: emailToUse
+      });
+
+      // Write to Supabase staff_profiles if configured
+      if (isSupabaseConfigured) {
+        try {
+          const rawUrl = (import.meta.env.VITE_SUPABASE_URL as string) || (import.meta.env.SUPABASE_URL as string) || '';
+          const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || (import.meta.env.SUPABASE_ANON_KEY as string) || '';
+          const sbClient = createClient(rawUrl, rawKey);
+          await sbClient.from("users").upsert(newStaffProfile);
+          await sbClient.from("staff_profiles").upsert({
+            uid: uid,
+            email: emailToUse,
+            display_name: cleanName,
+            username: cleanUsername,
+            designation: staffDesignation,
+            status: staffStatus,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        } catch (sbErr) {
+          console.warn("Supabase staff sync warning:", sbErr);
+        }
+      }
+
+      // Audit Log
+      await logAudit("CREATE", "REGISTER_STAFF_ACCOUNT", uid, null, {
+        displayName: cleanName,
+        email: emailToUse,
+        username: cleanUsername,
+        role: staffRole,
+        designation: staffDesignation,
+        status: staffStatus,
+        registeredBy: profile?.displayName || profile?.email || "Admin"
+      });
+
+      setStaffSuccess(
+        `SUCCESS: Staff Account Registered Successfully!\n\n` +
+        `Staff Name: ${cleanName}\n` +
+        `Assigned Designation: ${staffDesignation}\n` +
+        `Access Clearance: ${staffRole === 'Admin' ? 'Administrator' : 'Staff / Encoder (User)'}\n` +
+        `Assigned Username: "${cleanUsername}"\n` +
+        `Work Email: "${emailToUse}"\n` +
+        `Initial Password: "${staffPassword}"\n` +
+        `Account Status: ${staffStatus.toUpperCase()}\n\n` +
+        `The staff member can now log in using these credentials under the Staff portal.`
+      );
+
+      // Reset form fields
+      setStaffFullName("");
+      setStaffEmail("");
+      setStaffUsername("");
+      setStaffPassword("StaffPass123!");
+      setStaffDesignation("Treasury Tax Encoder");
+      setStaffRole("User");
+      setStaffStatus("Approved");
+
+    } catch (err: any) {
+      console.error("Staff Registration Error:", err);
+      setStaffError(err.message || "Failed to register staff account.");
+    } finally {
+      setStaffLoading(false);
+    }
+  };
+
   useEffect(() => {
     return onSnapshot(collection(db, "users"), (snapshot) => {
       setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
@@ -270,16 +494,33 @@ const Settings: React.FC = () => {
       title: status === "Approved" ? "Grant System Access?" : "Reject Access Request?",
       message: status === "Approved" 
         ? `You are about to VALIDATE ${user?.displayName} for system use. \n\nThey will be granted USER privileges by default. Proceed?`
-        : `You are about to DENY ${user?.displayName}'s request to join the system. \n\nThis action will prevent them from accessing any data nodes.`,
+        : `You are about to DENY ${user?.displayName}'s request to join the system. \n\nPlease provide official remarks for rejection.`,
       type: status === "Approved" ? "success" : "danger",
-      onConfirm: async () => {
+      showInput: status === "Denied",
+      requiredInput: status === "Denied",
+      inputPlaceholder: "State official reason for rejecting account request...",
+      inputLabel: "Remarks / Reason for Rejection (Required):",
+      onConfirm: async (reason?: string) => {
         try {
           const old = users.find(u => u.uid === uid);
-          await updateDoc(doc(db, "users", uid), { 
+          const updateData: any = { 
             status,
-            role: "User" // Default role upon approval
-          });
-          await logAudit("UPDATE", "UserStatus", uid, old, { status });
+            role: status === "Approved" ? "User" : (old?.role || "Guest")
+          };
+          if (status === "Denied" && reason) {
+            updateData.deactivationReason = reason;
+            updateData.archiveReason = reason;
+          }
+          await updateDoc(doc(db, "users", uid), updateData);
+          if (status === "Denied" && user?.username) {
+            await setDoc(doc(db, "user_mappings", user.username.toLowerCase()), {
+              username: user.username.toLowerCase(),
+              email: user.email,
+              status: "Denied",
+              deactivationReason: reason
+            }, { merge: true });
+          }
+          await logAudit("UPDATE", "UserStatus", uid, old, { status, deactivationReason: reason });
         } catch (err) {
           handleFirestoreError(err, OperationType.WRITE, `users/${uid}`);
         }
@@ -299,82 +540,291 @@ const Settings: React.FC = () => {
         title={confirmDialog.title}
         message={confirmDialog.message}
         type={confirmDialog.type}
+        showInput={confirmDialog.showInput}
+        inputPlaceholder={confirmDialog.inputPlaceholder}
+        inputLabel={confirmDialog.inputLabel}
+        requiredInput={confirmDialog.requiredInput}
       />
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-2xl font-bold text-white tracking-tight">System Authorization</h2>
-          <p className="text-slate-400 text-sm">Control administrative hierarchies and approve new user entry requests.</p>
+      <div className="bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-sm flex flex-col xl:flex-row xl:items-center justify-between gap-6">
+        <div>
+          <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+            <Shield className="w-4 h-4" />
+            <span>Administrative Controls</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">System Authorization & Access</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Control administrative hierarchies, provision resident profiles, and manage system user access permissions.
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-xl">
-            <button 
-              onClick={() => setActiveSubTab("active")}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeSubTab === "active" ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white"}`}
-            >
-              Registered Users
-            </button>
-            <button 
-              onClick={() => setActiveSubTab("pending")}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeSubTab === "pending" ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white"}`}
-            >
-              Pending Requests
-              {pendingUsers.length > 0 && (
-                <span className="w-4 h-4 bg-red-400 text-slate-950 text-[8px] font-black rounded-full flex items-center justify-center animate-pulse">
-                  {pendingUsers.length}
-                </span>
-              )}
-            </button>
-            <button 
-              onClick={() => setActiveSubTab("provision")}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${activeSubTab === "provision" ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white"}`}
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              Provision Resident
-            </button>
-          </div>
+        {/* Navigation Sub-Tabs Bar */}
+        <div className="bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800/80 flex flex-wrap items-center gap-1.5 shrink-0">
+          <button 
+            onClick={() => setActiveSubTab("active")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${activeSubTab === "active" ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "text-slate-400 hover:text-white hover:bg-slate-800/50"}`}
+          >
+            Registered Users
+          </button>
+          <button 
+            onClick={() => setActiveSubTab("pending")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${activeSubTab === "pending" ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "text-slate-400 hover:text-white hover:bg-slate-800/50"}`}
+          >
+            Pending Requests
+            {pendingUsers.length > 0 && (
+              <span className="w-4 h-4 bg-red-400 text-slate-950 text-[9px] font-black rounded-full flex items-center justify-center animate-pulse">
+                {pendingUsers.length}
+              </span>
+            )}
+          </button>
+          <button 
+            onClick={() => setActiveSubTab("staff")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${activeSubTab === "staff" ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "text-slate-400 hover:text-white hover:bg-slate-800/50"}`}
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            Register Staff Account
+          </button>
+          <button 
+            onClick={() => setActiveSubTab("provision")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${activeSubTab === "provision" ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "text-slate-400 hover:text-white hover:bg-slate-800/50"}`}
+          >
+            <Building2 className="w-3.5 h-3.5" />
+            Provision Resident
+          </button>
         </div>
       </div>
 
-      {/* Accessibility & Visual Themes Card */}
+      {/* Database Backup & Export Utility Card */}
       <div className="p-6 bg-slate-900/40 rounded-2xl border border-slate-800/80 backdrop-blur-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-1">
           <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-            <Sun className="w-4 h-4 text-amber-500" />
-            <span>Accessibility & Visual Themes</span>
+            <Database className="w-4 h-4 text-blue-400" />
+            <span>Database Backup & Export</span>
           </h3>
           <p className="text-slate-400 text-xs leading-relaxed max-w-xl">
-            Allows administrators to toggle between the default dark mode and a high-contrast light mode for better screen clarity and readability during bright daylight office hours.
+            Allows administrators to fetch database records (properties, payments, delinquencies, audit logs, and user accounts) and export them instantly into downloadable CSV or full JSON backup files.
           </p>
         </div>
-        <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0 w-fit">
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
           <button
-            onClick={() => handleThemeChange("dark")}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
-              theme === "dark" 
-                ? "bg-slate-800 text-blue-400 border border-slate-700 shadow-md" 
-                : "text-slate-500 hover:text-slate-300"
-            }`}
+            onClick={handleExportCSV}
+            disabled={isExporting || isExportingJSON}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider bg-blue-600 hover:bg-blue-500 text-white font-sans transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-blue-500/10 active:scale-98 cursor-pointer border border-blue-500/30"
           >
-            <Moon className="w-3.5 h-3.5 text-blue-400" />
-            <span>Default Dark</span>
+            {isExporting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Exporting CSV...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-3.5 h-3.5" />
+                <span>Export CSV (Properties)</span>
+              </>
+            )}
           </button>
           <button
-            onClick={() => handleThemeChange("light")}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
-              theme === "light" 
-                ? "bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-md" 
-                : "text-slate-500 hover:text-slate-300"
-            }`}
+            onClick={handleExportJSON}
+            disabled={isExporting || isExportingJSON}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider bg-slate-800 hover:bg-slate-700 text-emerald-400 font-sans transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-emerald-500/10 active:scale-98 cursor-pointer border border-emerald-500/30"
           >
-            <Sun className="w-3.5 h-3.5 text-amber-500" />
-            <span>High Contrast Light</span>
+            {isExportingJSON ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Exporting JSON...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-3.5 h-3.5" />
+                <span>Export JSON (Full Backup)</span>
+              </>
+            )}
           </button>
         </div>
       </div>
 
       <AnimatePresence mode="wait">
-        {activeSubTab === "provision" ? (
+        {activeSubTab === "staff" ? (
+          <motion.div 
+            key="staff-registration-form"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.25 }}
+            className="bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-800 p-6 md:p-8 shadow-xl mt-6"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white tracking-tight">Register Staff Account</h3>
+                  <p className="text-slate-400 text-xs">Provision new staff accounts for encoders, revenue collectors, assessors, and municipal officers with authorized system access.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setActiveSubTab("active")}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition-all cursor-pointer"
+              >
+                &larr; View All Users
+              </button>
+            </div>
+
+            <form onSubmit={handleStaffRegisterSubmit} className="space-y-6">
+              {staffError && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                  <div className="text-xs text-red-400 font-bold leading-relaxed">{staffError}</div>
+                </div>
+              )}
+
+              {staffSuccess && (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
+                  <Check className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-emerald-300 font-medium whitespace-pre-wrap leading-relaxed">{staffSuccess}</div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                    Staff Full Name <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Maria Santos"
+                    value={staffFullName}
+                    onChange={(e) => setStaffFullName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                    Work Email Address
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="e.g. maria.santos@dipaculao.gov (or leave empty to auto-generate)"
+                    value={staffEmail}
+                    onChange={(e) => setStaffEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                  <p className="text-[10px] text-slate-500">If left empty, will auto-default to username@rpt.dipaculao.gov</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                    Assigned Username <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. maria_santos"
+                    value={staffUsername}
+                    onChange={(e) => setStaffUsername(e.target.value.toLowerCase().replace(/\s+/g, ""))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                    Initial Access Password <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Must be at least 6 characters"
+                    value={staffPassword}
+                    onChange={(e) => setStaffPassword(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                    Staff Office / Designation <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={staffDesignation}
+                    onChange={(e) => setStaffDesignation(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                  >
+                    <option value="Treasury Tax Encoder">Treasury Tax Encoder</option>
+                    <option value="Revenue Collection Officer">Revenue Collection Officer</option>
+                    <option value="Assessor Assessment Staff">Assessor Assessment Staff</option>
+                    <option value="Real Property Examiner">Real Property Examiner</option>
+                    <option value="Municipal Treasurer / Deputy">Municipal Treasurer / Deputy</option>
+                    <option value="COA Resident Auditor">COA Resident Auditor</option>
+                    <option value="IT & Records Administrator">IT & Records Administrator</option>
+                    <option value="General Municipal Staff">General Municipal Staff</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                    Clearance Level / Role <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={staffRole}
+                    onChange={(e) => setStaffRole(e.target.value as UserRole)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                  >
+                    <option value="User">Staff / Encoder (Standard Access)</option>
+                    <option value="Admin">Administrator (Full System Access)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                    Account Access Status <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={staffStatus}
+                    onChange={(e) => setStaffStatus(e.target.value as "Approved" | "Pending")}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                  >
+                    <option value="Approved">Approved (Immediate Login Access)</option>
+                    <option value="Pending">Pending Review</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStaffFullName("");
+                    setStaffEmail("");
+                    setStaffUsername("");
+                    setStaffError(null);
+                    setStaffSuccess(null);
+                  }}
+                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Reset Form
+                </button>
+                <button
+                  type="submit"
+                  disabled={staffLoading}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-lg shadow-blue-600/20"
+                >
+                  {staffLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <UserPlus className="w-4 h-4" />
+                  )}
+                  <span>Register Staff Member</span>
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        ) : activeSubTab === "provision" ? (
           <motion.div 
             key="provision-form"
             initial={{ opacity: 0, y: 15 }}
@@ -623,6 +1073,24 @@ const Settings: React.FC = () => {
             transition={{ duration: 0.25 }}
             className="bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-800 overflow-hidden shadow-xl mt-6 animate-fade-in"
           >
+            {activeSubTab === "active" && (
+              <div className="px-6 py-4 bg-slate-900/80 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-blue-400" />
+                    <span>Active System Accounts ({activeUsers.length})</span>
+                  </h4>
+                  <p className="text-xs text-slate-400">Registered staff members, encoders, tax officers, residents, and administrators.</p>
+                </div>
+                <button
+                  onClick={() => setActiveSubTab("staff")}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 shrink-0 cursor-pointer shadow-md shadow-blue-600/20"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>+ Register Staff Account</span>
+                </button>
+              </div>
+            )}
             <table className="w-full text-left border-collapse font-sans">
               <thead>
                 <tr className="bg-slate-800/50 border-b border-slate-800">
@@ -637,15 +1105,24 @@ const Settings: React.FC = () => {
                   <tr key={user.uid} className="hover:bg-slate-800/10 group transition-all duration-300">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-slate-800 flex items-center justify-center text-blue-400 font-bold border border-slate-700/50 text-sm shadow-inner group-hover:border-blue-500/30 transition-colors">
+                        <div className="w-10 h-10 rounded-2xl bg-slate-800 flex items-center justify-center text-blue-400 font-bold border border-slate-700/50 text-sm shadow-inner group-hover:border-blue-500/30 transition-colors shrink-0">
                           {user.displayName?.charAt(0) || <AlertCircle className="w-4 h-4 text-amber-500/50" />}
                         </div>
                         <div>
-                          <p className="font-bold text-white text-sm tracking-tight">
-                            {user.displayName || <span className="text-amber-500/50 italic text-[10px]">UNIDENTIFIED_IDENTITY</span>}
-                          </p>
-                          <p className="text-xs text-slate-500 font-mono opacity-80">
-                            {user.email || <span className="text-slate-600 italic">no_email_node@system.local</span>}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-white text-sm tracking-tight">
+                              {user.displayName || <span className="text-amber-500/50 italic text-[10px]">UNIDENTIFIED_IDENTITY</span>}
+                            </p>
+                            {user.designation && (
+                              <span className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[9px] font-bold rounded-md uppercase tracking-wider">
+                                {user.designation}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 font-mono opacity-80 flex items-center gap-2 mt-0.5">
+                            {user.username && <span className="text-slate-400 font-semibold">@{user.username}</span>}
+                            {user.username && user.email && <span>&bull;</span>}
+                            <span>{user.email || 'no_email_node@system.local'}</span>
                           </p>
                         </div>
                       </div>
@@ -667,7 +1144,7 @@ const Settings: React.FC = () => {
                           onChange={(e) => updateRole(user.uid, e.target.value as UserRole)}
                         >
                           <option value="User">Staff</option>
-                          <option value="Admin">Admin</option>
+                          {user.role === 'Admin' && <option value="Admin">Admin</option>}
                           <option value="Resident">Resident</option>
                           <option value="Taxpayer">Taxpayer (Legacy)</option>
                           <option value="Guest">Guest</option>
@@ -705,31 +1182,76 @@ const Settings: React.FC = () => {
                           </span>
                           {user.email !== profile?.email && user.uid && (
                             <>
-                              <button
-                                onClick={() => updateRole(user.uid, user.role === 'Admin' ? 'User' : 'Admin')}
-                                className={user.role === 'Admin' ? 'btn-action-destructive' : 'btn-action-positive'}
-                              >
-                                {user.role === 'Admin' ? 'Revoke Admin' : 'Grant Admin'}
-                              </button>
-                              
                               <motion.button
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
                                 onClick={() => {
-                                  const identifier = user.displayName || user.email || user.uid || "Unknown Identity";
+                                  const identifier = user.displayName || user.email || user.username || user.uid || "Unknown Identity";
                                   setConfirmDialog({
                                     isOpen: true,
-                                    title: "Are you sure you want to permanently remove this user?",
-                                    message: `You are about to permanently remove ${identifier} from the system. This action is irreversible and will revoke all access instantly.`,
+                                    title: "Archive / Remove Account Identity?",
+                                    message: `You are about to deactivate and archive account "${identifier}".\n\nState official remarks or reason. This reason will be displayed to the resident/user when they attempt to log in.`,
                                     type: "danger",
-                                    onConfirm: async () => {
+                                    showInput: true,
+                                    requiredInput: true,
+                                    inputPlaceholder: "e.g., Account archived because property 22-09-001-00054 was permanently archived due to land re-assessment.",
+                                    inputLabel: "Remarks / Reason for Account Deletion (Required):",
+                                    onConfirm: async (reason?: string) => {
+                                      const finalReason = reason || "Account deactivated and archived by Municipal Administrator";
                                       try {
                                         const userRef = doc(db, "users", user.uid);
-                                        await deleteDoc(userRef);
+                                        await setDoc(userRef, {
+                                          ...user,
+                                          status: "Archived",
+                                          deactivationReason: finalReason,
+                                          archiveReason: finalReason,
+                                          archivedBy: profile?.displayName || profile?.email || "Admin",
+                                          archivedAt: new Date().toISOString()
+                                        }, { merge: true });
+
+                                        // Save mappings & archived_accounts for lookup
+                                        if (user.username) {
+                                          await setDoc(doc(db, "user_mappings", user.username.toLowerCase()), {
+                                            username: user.username.toLowerCase(),
+                                            email: user.email,
+                                            status: "Archived",
+                                            deactivationReason: finalReason,
+                                            archiveReason: finalReason
+                                          }, { merge: true });
+                                        }
+                                        if (user.email) {
+                                          await setDoc(doc(db, "user_mappings", user.email.toLowerCase()), {
+                                            username: user.username?.toLowerCase() || "",
+                                            email: user.email.toLowerCase(),
+                                            status: "Archived",
+                                            deactivationReason: finalReason,
+                                            archiveReason: finalReason
+                                          }, { merge: true });
+                                        }
+
+                                        await setDoc(doc(db, "archived_accounts", user.uid), {
+                                          ...user,
+                                          status: "Archived",
+                                          deactivationReason: finalReason,
+                                          archivedBy: profile?.displayName || profile?.email || "Admin",
+                                          archivedAt: new Date().toISOString()
+                                        });
+
+                                        try {
+                                          await supabase.from("users").update({
+                                            status: "Archived",
+                                            deactivationReason: finalReason,
+                                            archiveReason: finalReason
+                                          }).eq("uid", user.uid);
+                                        } catch (sbErr) {
+                                          console.warn("Supabase profile archive sync warning:", sbErr);
+                                        }
+
                                         await logAudit("DELETE", "USER_DELETE", user.uid, { 
                                           email: user.email || 'SYSTEM_USER', 
                                           role: user.role || 'USER_ROLE',
-                                          displayName: user.displayName || 'UNKNOWN_USER'
+                                          displayName: user.displayName || 'UNKNOWN_USER',
+                                          deactivationReason: finalReason
                                         });
                                       } catch (err: any) {
                                         console.error("Delete Failed:", err);

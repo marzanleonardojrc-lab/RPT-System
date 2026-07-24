@@ -136,3 +136,68 @@ export interface AuditLog {
   newValue?: any;
   timestamp: string;
 }
+
+export type QueryCategory = 
+  | "Tax Assessment" 
+  | "Payment Verification" 
+  | "Property Claim" 
+  | "Penalty Appeal" 
+  | "Ownership Transfer" 
+  | "General Inquiry";
+
+export type QueryStatus = "Pending" | "In Review" | "Responded" | "Resolved";
+
+export interface QueryReply {
+  id: string;
+  senderUid: string;
+  senderName: string;
+  senderRole: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface ResidentQuery {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  category: QueryCategory;
+  subject: string;
+  message: string;
+  propertyTdn?: string;
+  propertyPin?: string;
+  status: QueryStatus;
+  adminResponse?: string;
+  respondedBy?: string;
+  respondedAt?: string;
+  replies?: QueryReply[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RequestFormType = "clearance" | "revision" | "transfer";
+export type RequestFormStatus = "Submitted" | "Under Review" | "Approved" | "Ready for Pick-up" | "Rejected";
+
+export interface TaxpayerRequest {
+  id: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
+  propertyId: string;
+  propertyTdn: string;
+  propertyOwner: string;
+  type: RequestFormType;
+  status: RequestFormStatus;
+  contact?: string;
+  purpose?: string;
+  proposedAssessedValue?: number;
+  reason?: string;
+  newOwnerName?: string;
+  newOwnerAddress?: string;
+  transferDate?: string;
+  adminNotes?: string;
+  processedBy?: string;
+  processedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}

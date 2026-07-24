@@ -299,14 +299,15 @@ export const ReconciliationModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-sm">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Calculator className="w-6 h-6 text-blue-400" />
-            Inter-Department Reconciliation
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Reconcile Tax Levy, Collections, and Delinquencies for COA auditing
+          <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+            <Calculator className="w-4 h-4" />
+            <span>Treasury & Assessor Audit</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">Inter-Department Reconciliation</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Reconcile Tax Levy, Collections, and Delinquencies for official COA auditing & cross-verification.
           </p>
         </div>
         <div className="flex items-center gap-3">

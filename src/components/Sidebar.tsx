@@ -14,7 +14,11 @@ import {
   Compass,
   Briefcase,
   Coins,
-  Shield
+  Shield,
+  Sun,
+  Moon,
+  MessageSquare,
+  FileCheck
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -23,9 +27,11 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
   onLogout: () => void;
   isAdmin: boolean;
+  theme?: "dark" | "light";
+  onToggleTheme?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, isAdmin }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, isAdmin, theme = "dark", onToggleTheme }) => {
   const menuGroups = [
     {
       title: "OVERVIEW",
@@ -39,6 +45,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, is
       icon: Briefcase,
       items: [
         { id: "properties", label: "Properties", icon: Building2 },
+        { id: "requests", label: "Document Requests", icon: FileCheck },
+        { id: "queries", label: "Resident Queries", icon: MessageSquare },
         { id: "archive", label: "Archive", icon: Archive },
       ]
     },
@@ -89,14 +97,22 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, is
                     key={item.id}
                     onClick={() => setActiveTab(item.id)}
                     className={cn(
-                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 text-left",
-                      activeTab === item.id 
-                        ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" 
-                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent"
+                      "sidebar-nav-item group",
+                      activeTab === item.id && "active"
                     )}
+                    data-active={activeTab === item.id}
                   >
-                    <item.icon className={cn("w-4 h-4 shrink-0", activeTab === item.id ? "text-blue-400" : "text-slate-500")} />
-                    <span className="truncate">{item.label}</span>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <item.icon className={cn(
+                        "w-4 h-4 shrink-0 transition-colors nav-icon",
+                        activeTab === item.id 
+                          ? "text-blue-400" 
+                          : item.id === "collection" || item.id === "reconciliation" || item.id === "delinquencies"
+                            ? "text-slate-400 group-hover:text-emerald-400"
+                            : "text-slate-400 group-hover:text-blue-400"
+                      )} />
+                      <span className="truncate">{item.label}</span>
+                    </div>
                   </button>
                 ))}
               </div>
@@ -105,7 +121,25 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, is
         })}
       </nav>
 
-      <div className="p-4 bg-slate-950 border-t border-slate-800">
+      <div className="p-4 bg-slate-950 border-t border-slate-800 space-y-2">
+        {onToggleTheme && (
+          <button
+            onClick={onToggleTheme}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-slate-400 hover:bg-slate-800/80 hover:text-white transition-all border border-slate-800/80 cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5">
+              {theme === "light" ? (
+                <Sun className="w-4 h-4 text-amber-500 shrink-0" />
+              ) : (
+                <Moon className="w-4 h-4 text-blue-400 shrink-0" />
+              )}
+              <span>{theme === "light" ? "Light Mode" : "Dark Mode"}</span>
+            </div>
+            <span className="text-[10px] font-mono uppercase text-slate-500 font-bold px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800">
+              {theme === "light" ? "LIGHT" : "DARK"}
+            </span>
+          </button>
+        )}
         <button
           onClick={onLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-red-500/10 hover:text-red-400 transition-all border border-transparent hover:border-red-500/20"

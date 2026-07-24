@@ -13,17 +13,52 @@ import {
 } from "lucide-react";
 import { getOfflineQueue, processOfflineQueue, OfflineTask, saveOfflineQueue } from "../lib/offlineSync";
 import { useAuth } from "../AuthContext";
-import { cn, formatCurrency } from "../lib/utils";
+import { cn } from "../lib/utils";
+import { checkConnection, isSupabaseConfigured } from "../lib/supabase";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function OfflineSyncStatus() {
-  const { isOffline } = useAuth();
+  const { isOffline, isAdmin } = useAuth();
   const [queue, setQueue] = useState<OfflineTask[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ success: number; fail: number } | null>(null);
 
-  // Sync state with localstorage queue changes
+  // Supabase connection state
+  const [isSupabaseOnline, setIsSupabaseOnline] = useState<boolean | null>(null);
+  const [isCheckingSupabase, setIsCheckingSupabase] = useState(false);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+
+  const verifySupabaseConnection = async () => {
+    if (isCheckingSupabase) return;
+    setIsCheckingSupabase(true);
+    try {
+      if (!isSupabaseConfigured) {
+        setIsSupabaseOnline(true);
+        window.dispatchEvent(new CustomEvent("supabase-connection-changed", { detail: { isOnline: true } }));
+        return;
+      }
+
+      if (isOffline) {
+        setIsSupabaseOnline(false);
+        window.dispatchEvent(new CustomEvent("supabase-connection-changed", { detail: { isOnline: false } }));
+        return;
+      }
+      
+      const isHealthy = await checkConnection();
+      setIsSupabaseOnline(isHealthy);
+      setLastChecked(new Date());
+      window.dispatchEvent(new CustomEvent("supabase-connection-changed", { detail: { isOnline: isHealthy } }));
+    } catch (err) {
+      console.error("Supabase health check error:", err);
+      setIsSupabaseOnline(false);
+      window.dispatchEvent(new CustomEvent("supabase-connection-changed", { detail: { isOnline: false } }));
+    } finally {
+      setIsCheckingSupabase(false);
+    }
+  };
+
+  // Sync queue listener
   useEffect(() => {
     setQueue(getOfflineQueue());
 
@@ -50,11 +85,37 @@ export default function OfflineSyncStatus() {
     };
   }, []);
 
+  // Periodic health check and network listeners
+  useEffect(() => {
+    // Initial run
+    verifySupabaseConnection();
+
+    // Set check interval to 20 seconds
+    const intervalId = setInterval(() => {
+      verifySupabaseConnection();
+    }, 20000);
+
+    const handleNetworkChange = () => {
+      verifySupabaseConnection();
+    };
+
+    window.addEventListener("online", handleNetworkChange);
+    window.addEventListener("offline", handleNetworkChange);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener("online", handleNetworkChange);
+      window.removeEventListener("offline", handleNetworkChange);
+    };
+  }, [isOffline]);
+
   const handleManualSync = async () => {
     if (isSyncing || queue.length === 0) return;
     setIsSyncing(true);
     try {
       await processOfflineQueue();
+      // Re-verify health upon manual sync trigger
+      verifySupabaseConnection();
     } catch (err) {
       console.error("Manual sync failed:", err);
     } finally {
@@ -70,6 +131,8 @@ export default function OfflineSyncStatus() {
   const pendingCount = queue.filter(t => t.status !== 'failed').length;
   const failedCount = queue.filter(t => t.status === 'failed').length;
 
+  const isInterrupted = isSupabaseConfigured && isSupabaseOnline === false;
+
   return (
     <div className="relative font-sans text-xs">
       {/* Mini Bar Status Badge */}
@@ -79,19 +142,21 @@ export default function OfflineSyncStatus() {
           "flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all duration-200 select-none shadow-md",
           isOffline 
             ? "bg-amber-500/15 border-amber-500/30 text-amber-400 hover:bg-amber-500/25"
-            : queue.length > 0
-              ? "bg-blue-500/15 border-blue-500/30 text-blue-400 hover:bg-blue-500/25"
-              : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
+            : isInterrupted
+              ? "bg-rose-500/15 border-rose-500/30 text-rose-400 hover:bg-rose-500/25 animate-pulse"
+              : queue.length > 0
+                ? "bg-blue-500/15 border-blue-500/30 text-blue-400 hover:bg-blue-500/25"
+                : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
         )}
       >
         <span className="relative flex h-2 w-2">
           <span className={cn(
             "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-            isOffline ? "bg-amber-400" : queue.length > 0 ? "bg-blue-400" : "bg-emerald-400"
+            isOffline ? "bg-amber-400" : isInterrupted ? "bg-rose-400" : queue.length > 0 ? "bg-blue-400" : "bg-emerald-400"
           )}></span>
           <span className={cn(
             "relative inline-flex rounded-full h-2 w-2",
-            isOffline ? "bg-amber-500" : queue.length > 0 ? "bg-blue-500" : "bg-emerald-500"
+            isOffline ? "bg-amber-500" : isInterrupted ? "bg-rose-500" : queue.length > 0 ? "bg-blue-500" : "bg-emerald-500"
           )}></span>
         </span>
 
@@ -104,6 +169,11 @@ export default function OfflineSyncStatus() {
                 {queue.length}
               </span>
             )}
+          </div>
+        ) : isInterrupted ? (
+          <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
+            <ServerCrash className="w-3.5 h-3.5" />
+            <span>Sync Interrupted</span>
           </div>
         ) : (
           <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
@@ -134,14 +204,64 @@ export default function OfflineSyncStatus() {
               <div className="flex justify-between items-center pb-3 border-b border-slate-800/80 mb-4">
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-blue-400" />
-                  <span className="text-sm font-bold text-white tracking-tight">Offline Sync Manager</span>
+                  <span className="text-sm font-bold text-white tracking-tight">Sync & Connection Status</span>
                 </div>
                 <div className={cn(
                   "px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider",
-                  isOffline ? "bg-amber-500/10 text-amber-500" : "bg-emerald-500/10 text-emerald-500"
+                  isOffline ? "bg-amber-500/10 text-amber-500" : isInterrupted ? "bg-rose-500/10 text-rose-500" : "bg-emerald-500/10 text-emerald-500"
                 )}>
-                  {isOffline ? "Offline" : "Online"}
+                  {isOffline ? "Offline" : isInterrupted ? "Interrupted" : "Connected"}
                 </div>
+              </div>
+
+              {/* Administrator Real-Time Alert Banner if Interrupted */}
+              {isAdmin && isInterrupted && (
+                <div className="mb-4 p-3 bg-rose-500/15 border border-rose-500/20 rounded-2xl text-rose-400 text-xs">
+                  <div className="flex items-center gap-1.5 font-bold mb-1">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>Admin Alert: Sync Offline</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-normal">
+                    The connection to Supabase central database is unreachable. Synchronization has been paused. All changes are being recorded safely in the local queue.
+                  </p>
+                </div>
+              )}
+
+              {/* Connection health check block */}
+              <div className="bg-slate-950/60 rounded-2xl p-3 border border-slate-800/60 mb-4 space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-400">Database Connection:</span>
+                  <span className={cn(
+                    "font-bold uppercase tracking-wider text-[9px] px-1.5 py-0.5 rounded",
+                    isOffline 
+                      ? "bg-amber-500/10 text-amber-500" 
+                      : isInterrupted 
+                        ? "bg-rose-500/10 text-rose-500" 
+                        : "bg-emerald-500/10 text-emerald-500"
+                  )}>
+                    {isOffline 
+                      ? "Browser Offline" 
+                      : isInterrupted 
+                        ? "Sync Interrupted" 
+                        : "Healthy (Live)"}
+                  </span>
+                </div>
+                
+                {lastChecked && (
+                  <div className="flex justify-between text-[9px] text-slate-500">
+                    <span>Last Checked:</span>
+                    <span>{lastChecked.toLocaleTimeString()}</span>
+                  </div>
+                )}
+
+                <button
+                  onClick={verifySupabaseConnection}
+                  disabled={isOffline || isCheckingSupabase}
+                  className="w-full mt-1 py-1.5 px-2 bg-slate-800 hover:bg-slate-750 text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-bold flex items-center justify-center gap-1 border border-slate-700 text-[10px] transition-colors"
+                >
+                  <RefreshCw className={cn("w-3 h-3", isCheckingSupabase && "animate-spin")} />
+                  {isCheckingSupabase ? "Testing..." : "Test Connection Now"}
+                </button>
               </div>
 
               {/* Status information */}

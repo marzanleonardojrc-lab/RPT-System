@@ -343,11 +343,11 @@ const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onClose, on
               <div className="space-y-3">
                 {(() => {
                   const grouped = groupDelinquenciesByPenaltyRule(history, property.assessedValue);
-                  // Sort the groups in descending order by the maximum year in each group
+                  // Sort the groups in ascending order by the minimum year in each group (latest year below)
                   const sortedGrouped = [...grouped].sort((a, b) => {
-                    const maxA = Math.max(...a.years);
-                    const maxB = Math.max(...b.years);
-                    return maxB - maxA;
+                    const minA = Math.min(...a.years);
+                    const minB = Math.min(...b.years);
+                    return minA - minB;
                   });
                   return sortedGrouped.map((row) => {
                     const firstYearRecord = history.find(h => h.year === row.years[0]);

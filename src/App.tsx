@@ -9,6 +9,8 @@ import AuditLogView from "./components/AuditLogView";
 import Settings from "./components/Settings";
 import { ReconciliationModule } from "./components/ReconciliationModule";
 import CollectionModule from "./components/CollectionModule";
+import ResidentQueriesModule from "./components/ResidentQueriesModule";
+import DocumentRequestsModule from "./components/DocumentRequestsModule";
 import Login from "./components/Login";
 import ProfileModal from "./components/ProfileModal";
 import { AlertCircle } from "lucide-react";
@@ -17,13 +19,28 @@ import ForcedPasswordResetOverlay from "./components/ForcedPasswordResetOverlay"
 import { GlobalSearch } from "./components/GlobalSearch";
 import PropertyDetails from "./components/PropertyDetails";
 import { Property } from "./types";
+import { motion } from "motion/react";
+import OfflineSyncStatus from "./components/OfflineSyncStatus";
+import { checkConnection, isSupabaseConfigured } from "./lib/supabase";
 
 const AppContent: React.FC = () => {
-  const { user, profile, loading, logout, isAdmin, isEncoder, isOffline, isTaxpayer } = useAuth();
+  const { user, profile, loading, logout, isAdmin, isEncoder, isOffline, isTaxpayer, isQuotaExceeded } = useAuth();
   const [activeTabInner, setActiveTabInner] = useState("dashboard");
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [selectedPropertyFromSearch, setSelectedPropertyFromSearch] = useState<Property | null>(null);
   const [paymentPrefillProperty, setPaymentPrefillProperty] = useState<Property | null>(null);
+  const [isSupabaseOnline, setIsSupabaseOnline] = useState<boolean>(true);
+
+  React.useEffect(() => {
+    const handleConnectionChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ isOnline: boolean }>;
+      setIsSupabaseOnline(customEvent.detail.isOnline);
+    };
+    window.addEventListener("supabase-connection-changed", handleConnectionChange);
+    return () => {
+      window.removeEventListener("supabase-connection-changed", handleConnectionChange);
+    };
+  }, []);
 
   const activeTab = activeTabInner;
   const setActiveTab = (tab: string) => {
@@ -39,14 +56,46 @@ const AppContent: React.FC = () => {
     setActiveTab("collection");
   };
 
-  React.useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    if (savedTheme === "light") {
+  const [theme, setTheme] = useState<"dark" | "light">(
+    () => (localStorage.getItem("theme") as "dark" | "light") || "dark"
+  );
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    localStorage.setItem("theme", nextTheme);
+    if (nextTheme === "light") {
       document.documentElement.classList.add("light");
     } else {
       document.documentElement.classList.remove("light");
     }
-  }, []);
+    window.dispatchEvent(new CustomEvent("theme-changed", { detail: { theme: nextTheme } }));
+  };
+
+  React.useEffect(() => {
+    if (theme === "light") {
+      document.documentElement.classList.add("light");
+    } else {
+      document.documentElement.classList.remove("light");
+    }
+
+    const handleThemeEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ theme: "dark" | "light" }>;
+      if (customEvent.detail?.theme) {
+        setTheme(customEvent.detail.theme);
+        if (customEvent.detail.theme === "light") {
+          document.documentElement.classList.add("light");
+        } else {
+          document.documentElement.classList.remove("light");
+        }
+      }
+    };
+
+    window.addEventListener("theme-changed", handleThemeEvent);
+    return () => {
+      window.removeEventListener("theme-changed", handleThemeEvent);
+    };
+  }, [theme]);
 
   if (loading) {
     return (
@@ -175,6 +224,8 @@ const AppContent: React.FC = () => {
       case "properties": return <PropertyRegistry key="properties-active" isEncoder={isEncoder} isAdmin={isAdmin} initialTab="Active" showTabsSelector={false} onPostPayment={handlePostPayment} />;
       case "archive": return <PropertyRegistry key="properties-archive" isEncoder={isEncoder} isAdmin={isAdmin} initialTab="Archived" showTabsSelector={false} onPostPayment={handlePostPayment} />;
       case "collection": return <CollectionModule prefillProperty={paymentPrefillProperty} />;
+      case "requests": return <DocumentRequestsModule />;
+      case "queries": return <ResidentQueriesModule />;
       case "delinquencies": return <DelinquencyList isEncoder={isEncoder} isAdmin={isAdmin} onPostPayment={handlePostPayment} />;
       case "reconciliation": return <ReconciliationModule />;
       case "reports": return <COAReports />;
@@ -191,6 +242,8 @@ const AppContent: React.FC = () => {
         setActiveTab={setActiveTab} 
         onLogout={logout} 
         isAdmin={isAdmin}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
       <main className="pl-64 min-h-screen bg-[radial-gradient(circle_at_top_right,_#1e293b,_transparent_40%)]">
         <header className="h-16 bg-slate-900/50 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 sticky top-0 z-40">
@@ -200,6 +253,7 @@ const AppContent: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-4">
+            <OfflineSyncStatus />
             <div 
               className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 p-2 rounded-xl transition-colors"
               onClick={() => setIsProfileModalOpen(true)}
@@ -215,6 +269,63 @@ const AppContent: React.FC = () => {
           </div>
         </header>
         <div className="p-8 max-w-7xl mx-auto">
+          {isAdmin && !isSupabaseOnline && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-5 bg-rose-500/10 border border-rose-500/20 rounded-[2.5rem] flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg backdrop-blur-sm relative overflow-hidden"
+            >
+              <div className="absolute -top-12 -left-12 w-24 h-24 bg-rose-500/10 blur-xl rounded-full" />
+              <div className="flex gap-3 relative z-10">
+                <AlertCircle className="text-rose-500 w-5 h-5 shrink-0 mt-0.5 md:mt-0 animate-pulse" />
+                <div>
+                  <h4 className="text-sm font-bold text-rose-400">Database Synchronization Interrupted</h4>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Admin Attention Required: The connection to the central Supabase server is unreachable. Automatic sync is temporarily paused. Transactions will queue locally and sync automatically when connection health is restored.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 relative z-10">
+                <button 
+                  onClick={async () => {
+                    window.dispatchEvent(new CustomEvent("online"));
+                    const healthy = await checkConnection();
+                    setIsSupabaseOnline(healthy || !isSupabaseConfigured);
+                  }}
+                  className="px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold text-xs rounded-xl transition-all border border-rose-500/30 text-center font-sans cursor-pointer"
+                >
+                  Retry Central Connection
+                </button>
+                <button
+                  onClick={() => setIsSupabaseOnline(true)}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-all border border-slate-700 text-center font-sans cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </motion.div>
+          )}
+          {isQuotaExceeded && (
+            <div className="mb-6 p-5 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg backdrop-blur-sm">
+              <div className="flex gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 md:mt-0" />
+                <div>
+                  <h4 className="text-sm font-bold text-amber-400">Firebase Firestore Daily Read Quota Exceeded</h4>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    The free tier database read quota for this project has been exhausted for today. The system is operating in restricted local-offline mode. Please wait for the daily reset tomorrow or upgrade your Firebase plan.
+                  </p>
+                </div>
+              </div>
+              <a 
+                href="https://console.firebase.google.com/project/gen-lang-client-0015493170/firestore/databases/ai-studio-3027ba5d-1b4c-4ad6-8dbc-237c33ad3844/data?openUpgradeDialog=true"
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md shadow-amber-500/10 text-center"
+              >
+                Upgrade Plan in Console
+              </a>
+            </div>
+          )}
           {renderContent()}
         </div>
       </main>

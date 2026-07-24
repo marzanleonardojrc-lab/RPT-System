@@ -11,15 +11,38 @@
   }
 
   @media print {
-    .no-print {
+    .no-print, nav, header, aside, button, .no-print-area {
       display: none !important;
     }
-    body {
-      background: white !important;
-      color: black !important;
+    body, html {
+      background: #ffffff !important;
+      color: #000000 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+      overflow: visible !important;
     }
-    .print-border {
-      border: 1px solid #e2e8f0 !important;
+    /* Hide everything unless it's in printable-area or print-only */
+    body > *:not(#printable-area):not(.printable-container) {
+      display: none !important;
+    }
+    #printable-area, .printable-container {
+      display: block !important;
+      position: absolute !important;
+      left: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 20px !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+      box-shadow: none !important;
+      border: none !important;
+      z-index: 999999 !important;
+    }
+    #printable-area *, .printable-container * {
+      color: #000000 !important;
+      text-shadow: none !important;
     }
   }
 }
@@ -27,15 +50,61 @@
 @layer components {
   /* Action button standardization */
   :root {
+    --clr-surface-a0: rgba(15, 23, 42, 0.6);
+    --clr-surface-a30: rgba(30, 41, 59, 0.8);
+    --clr-primary-a0: #2563eb;
     --action-primary-color: #60a5fa; /* Pastel blue tailwind blue-400 */
     --action-primary-border: rgba(96, 165, 250, 0.3);
     --action-primary-hover: rgba(96, 165, 250, 0.2);
+
+    /* Sidebar Navigation CSS Variables */
+    --sidebar-active-bg: rgba(13, 33, 67, 0.9);
+    --sidebar-active-border: rgba(59, 130, 246, 0.65);
+    --sidebar-active-text: #60a5fa;
+    --sidebar-hover-bg: rgba(30, 41, 59, 0.8);
+    --sidebar-hover-text: #ffffff;
+    --sidebar-default-text: #94a3b8;
   }
 
   html.light {
+    --clr-surface-a0: #ffffff;
+    --clr-surface-a30: #cbd5e1;
+    --clr-primary-a0: #2563eb;
     --action-primary-color: #002060;
     --action-primary-border: rgba(0, 32, 96, 0.3);
     --action-primary-hover: rgba(0, 32, 96, 0.1);
+
+    /* Sidebar Navigation Light Mode CSS Variables */
+    --sidebar-active-bg: #eff6ff;
+    --sidebar-active-border: #3b82f6;
+    --sidebar-active-text: #1d4ed8;
+    --sidebar-hover-bg: #f1f5f9;
+    --sidebar-hover-text: #0f172a;
+    --sidebar-default-text: #475569;
+  }
+
+  .sidebar-nav-item {
+    @apply w-full h-11 px-4 rounded-xl flex items-center justify-between text-xs font-black uppercase tracking-wider transition-all duration-200 text-left cursor-pointer border border-transparent bg-transparent select-none;
+    color: var(--sidebar-default-text);
+  }
+
+  .sidebar-nav-item:hover {
+    background-color: var(--sidebar-hover-bg);
+    color: var(--sidebar-hover-text);
+    border-color: transparent;
+  }
+
+  .sidebar-nav-item.active,
+  .sidebar-nav-item[data-active="true"] {
+    background-color: var(--sidebar-active-bg);
+    border-color: var(--sidebar-active-border);
+    color: var(--sidebar-active-text);
+    box-shadow: 0 4px 12px rgba(11, 21, 40, 0.4);
+  }
+
+  .sidebar-nav-item.active .nav-icon,
+  .sidebar-nav-item[data-active="true"] .nav-icon {
+    color: var(--sidebar-active-text) !important;
   }
 
   .btn-action-primary {
@@ -67,6 +136,15 @@
 }
 ::-webkit-scrollbar-thumb {
   @apply bg-slate-800 rounded-full hover:bg-slate-700;
+}
+
+/* Hide scrollbar utility for fluid scroll containers */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Custom scrollbars for light theme override */

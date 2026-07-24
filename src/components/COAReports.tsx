@@ -232,22 +232,28 @@ const COAReports: React.FC = () => {
         type={confirmDialog.type}
       />
       
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 no-print">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-2xl font-bold text-white tracking-tight">Report Generation</h2>
-          <p className="text-slate-400 text-sm">Generate compliant reports according to the RPT checklist specifications.</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-sm no-print">
+        <div>
+          <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>COA Compliance & Auditing</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">COA Reports & Audit Generation</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Generate compliant municipal reports and audit sheets according to COA RPT checklist specifications.
+          </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <button 
             onClick={exportToCSV}
-            className="flex items-center gap-2 px-4 py-2 border border-slate-800 rounded-lg hover:bg-slate-800 transition text-sm font-medium text-slate-300"
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 border border-slate-700/80 rounded-2xl hover:bg-slate-800 transition text-xs font-bold uppercase tracking-wider text-slate-200"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
             Export Excel
           </button>
           <button 
             onClick={handlePrint}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition text-sm font-bold shadow-lg shadow-blue-600/20"
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-2xl hover:bg-blue-500 transition text-xs font-bold uppercase tracking-wider shadow-lg shadow-blue-600/20"
           >
             <Printer className="w-4 h-4" />
             Print Report

@@ -11,9 +11,12 @@ import {
   serverTimestamp,
   getDocs,
   orderBy,
-  limit
-} from "firebase/firestore";
-import { db, auth, OperationType, handleFirestoreError } from "../lib/firebase";
+  limit,
+  db, 
+  auth, 
+  OperationType, 
+  handleFirestoreError 
+} from "../lib/firebase";
 import { addToOfflineQueue } from "../lib/offlineSync";
 import { useAuth } from "../AuthContext";
 import { Delinquency, Property, Payment } from "../types";
@@ -43,6 +46,7 @@ import { TransactionHistoryModal } from "./TransactionHistoryModal";
 
 import { PaymentMigrator } from "./PaymentMigrator";
 import { MigrationAuditLogModal } from "./MigrationAuditLogModal";
+import { invalidatePayment } from "../lib/supabase";
 
 export default function CollectionModule({ prefillProperty }: { prefillProperty?: Property | null }) {
   const { profile, isEncoder, isAdmin } = useAuth();
@@ -770,31 +774,14 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
     }
 
     try {
-      const response = await fetch("/api/payments/invalidate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          adminEmail: voidUsername.trim(),
-          adminPassword: voidPassword,
-          orNumber: orNumber.trim(),
-          reason: voidReason.trim()
-        })
+      const data = await invalidatePayment({
+        adminEmail: voidUsername.trim(),
+        adminPassword: voidPassword,
+        orNumber: orNumber.trim(),
+        reason: voidReason.trim()
       });
 
-      const responseText = await response.text();
-      let data: any = null;
-      
-      try {
-        data = JSON.parse(responseText);
-      } catch (jsonErr) {
-        if (!response.ok) {
-          throw new Error(`Server returned error status ${response.status}: ${responseText.substring(0, 200)}`);
-        }
-      }
-
-      if (!response.ok) {
+      if (!data || !data.success) {
         throw new Error(data?.error || "Failed to void payment record.");
       }
 
@@ -868,30 +855,36 @@ export default function CollectionModule({ prefillProperty }: { prefillProperty?
   return (
     <div className="space-y-6">
       {/* LEDGER VIEW HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-sm">
         <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">Collection Ledger</h2>
-          <p className="text-slate-500 text-sm mt-1">Audit log of validated tax payments and property clearances.</p>
+          <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+            <Receipt className="w-4 h-4" />
+            <span>Treasury & Revenue Collection</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">Collection Ledger</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Audit log of validated tax payments, official receipts, and property tax clearances.
+          </p>
         </div>
         {isEncoder && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button 
               onClick={() => setIsViewingHistory(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-transparent border border-slate-700 text-slate-300 rounded-xl hover:bg-slate-800 transition font-bold text-xs uppercase tracking-wider"
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 border border-slate-700/80 text-slate-300 rounded-2xl hover:bg-slate-800 transition font-bold text-xs uppercase tracking-wider"
             >
               <History className="w-4 h-4 text-slate-400" />
               Import History
             </button>
             <button 
               onClick={() => setIsMigrating(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-transparent border border-blue-500/50 text-blue-400 rounded-xl hover:bg-blue-500/10 hover:border-blue-500 transition font-bold text-xs uppercase tracking-wider"
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 border border-blue-500/50 text-blue-400 rounded-2xl hover:bg-blue-500/10 hover:border-blue-500 transition font-bold text-xs uppercase tracking-wider"
             >
               <Upload className="w-4 h-4" />
               Migrate Data
             </button>
             <button 
               onClick={() => setIsPosting(true)}
-              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition shadow-lg shadow-blue-600/20 font-bold text-xs uppercase tracking-wider"
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-2xl hover:bg-blue-500 transition shadow-lg shadow-blue-600/20 font-bold text-xs uppercase tracking-wider"
             >
               <Receipt className="w-4 h-4" />
               Post Payment Record

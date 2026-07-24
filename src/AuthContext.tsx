@@ -1,27 +1,20 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { UserProfile, UserRole } from "./types";
 import { 
-  auth, 
-  db, 
-  onAuthStateChanged, 
-  signInWithPopup, 
-  googleProvider, 
-  signOut, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  serverTimestamp,
-  collection,
-  getDocs,
-  query,
-  where
-} from "./lib/firebase";
-import { updateProfile, updatePassword } from "firebase/auth";
+  getCurrentSession, 
+  getCurrentUser, 
+  onSessionStateChange, 
+  signInWithEmail as sbSignInWithEmail, 
+  signUpWithEmail as sbSignUpWithEmail, 
+  signInWithGoogle, 
+  resetPassword as sbResetPassword, 
+  updateUserName as sbUpdateUserName, 
+  updateUserUsername as sbUpdateUserUsername, 
+  updateUserPassword as sbUpdateUserPassword, 
+  getUserProfile, 
+  logout as sbLogout 
+} from "./lib/auth-helpers";
+import { supabase } from "./lib/supabase";
 import { initializeAutoSync } from "./lib/offlineSync";
 
 const createAuthError = (code: string, message?: string) => {
@@ -36,7 +29,7 @@ interface AuthContextType {
   loading: boolean;
   signIn: () => Promise<void>;
   signInWithEmail: (emailOrUsername: string, pass: string) => Promise<void>;
-  signUpWithEmail: (email: string, pass: string, name: string, username: string, role?: UserRole, linkedPropertyIds?: string[]) => Promise<void>;
+  signUpWithEmail: (email: string, pass: string, name: string, username: string, role?: UserRole, linkedPropertyIds?: string[], designation?: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   updateUserName: (name: string) => Promise<void>;
   updateUserUsername: (username: string) => Promise<void>;
@@ -47,6 +40,7 @@ interface AuthContextType {
   isGuest: boolean;
   isTaxpayer: boolean;
   isOffline: boolean;
+  isQuotaExceeded: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -56,93 +50,153 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
+    const handleQuotaExceeded = () => setIsQuotaExceeded(true);
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    window.addEventListener("rpt-quota-exceeded", handleQuotaExceeded);
 
     const cleanupAutoSync = initializeAutoSync();
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("rpt-quota-exceeded", handleQuotaExceeded);
       if (cleanupAutoSync) cleanupAutoSync();
     };
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    // Check initial session
+    const checkInitialSession = async () => {
       try {
-        if (firebaseUser) {
-          setUser(firebaseUser);
+        const session = await getCurrentSession();
+        if (session?.user) {
+          const sbUser = session.user;
+          setUser(sbUser);
           
-          // Try to fetch profile, if offline use cache
-          let userDoc;
-          try {
-            // First try normal getDoc (which uses cache if available)
-            userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-            setIsOffline(false);
-          } catch (docErr: any) {
-            console.error("Profile Fetch Error:", docErr);
-            if (docErr.message?.includes('offline')) {
-              setIsOffline(true);
-              // We might still want to try to get from cache if it fails with offline
-              // but getDoc usually does that. If it throws here, it means cache missed too.
-            }
-            setLoading(false);
-            return;
-          }
-
-          if (userDoc.exists()) {
-            setProfile(userDoc.data() as UserProfile);
-          } else {
-            // Handle case where user exists in Auth but not in Firestore (e.g., first Google login)
-            const baseUsername = firebaseUser.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, '') || "user";
+          let userProfile = await getUserProfile(sbUser.id);
+          if (!userProfile) {
+            // Create user profile if it doesn't exist (e.g. Google Sign In)
+            const baseUsername = sbUser.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, '') || "user";
             let username = baseUsername;
             
-            // Basic conflict check
-            const mappingDoc = await getDoc(doc(db, "user_mappings", username));
-            if (mappingDoc.exists()) {
+            // Check username availability
+            const { data: existingUser } = await supabase
+              .from('users')
+              .select('uid')
+              .eq('username', username)
+              .maybeSingle();
+              
+            if (existingUser) {
               username = `${baseUsername}${Math.floor(Math.random() * 1000)}`;
             }
-
-            const newProfile: any = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || "",
-              displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+            
+            const isAdminEmail = sbUser.email === "marzanleonardojrc@gmail.com" || sbUser.email === "marzan.leonardo04@gmail.com";
+            const assignedRole = isAdminEmail ? "Admin" : "User";
+            const assignedStatus = isAdminEmail ? "Approved" : "Pending";
+            
+            const newProfile: UserProfile = {
+              uid: sbUser.id,
+              email: sbUser.email || "",
+              displayName: sbUser.user_metadata?.displayName || sbUser.user_metadata?.full_name || sbUser.email?.split("@")[0] || "User",
               username: username,
-              role: (firebaseUser.email === "marzanleonardojrc@gmail.com" || firebaseUser.email === "marzan.leonardo04@gmail.com") ? "Admin" : "User",
-              status: (firebaseUser.email === "marzanleonardojrc@gmail.com" || firebaseUser.email === "marzan.leonardo04@gmail.com") ? "Approved" : "Pending",
-              createdAt: serverTimestamp()
+              role: assignedRole,
+              status: assignedStatus as any,
+              createdAt: new Date().toISOString()
             };
-            await setDoc(doc(db, "users", firebaseUser.uid), newProfile);
-            await setDoc(doc(db, "user_mappings", username), {
-              username: username,
-              email: firebaseUser.email
-            });
-            setProfile({ ...newProfile, createdAt: new Date().toISOString() } as UserProfile);
+            
+            const { error: insertError } = await supabase
+              .from('users')
+              .upsert(newProfile);
+              
+            if (insertError) {
+              console.error("Supabase: Failed to auto-provision user profile:", insertError);
+            }
+            userProfile = newProfile;
           }
+          setProfile(userProfile);
         } else {
           setUser(null);
           setProfile(null);
         }
       } catch (err) {
-        console.error("Auth Listener Error:", err);
-        // If we can't fetch profile, we might still have the user
-        // but the app should handle profile being null
+        console.error("Initial Session Check Error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkInitialSession();
+
+    // Listen to changes
+    const subscription = onSessionStateChange(async (session, sbUser) => {
+      try {
+        if (sbUser) {
+          setUser(sbUser);
+          let userProfile = await getUserProfile(sbUser.id);
+          if (!userProfile) {
+            // Provision user profile
+            const baseUsername = sbUser.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, '') || "user";
+            let username = baseUsername;
+            const { data: existingUser } = await supabase
+              .from('users')
+              .select('uid')
+              .eq('username', username)
+              .maybeSingle();
+              
+            if (existingUser) {
+              username = `${baseUsername}${Math.floor(Math.random() * 1000)}`;
+            }
+            
+            const isAdminEmail = sbUser.email === "marzanleonardojrc@gmail.com" || sbUser.email === "marzan.leonardo04@gmail.com";
+            const assignedRole = isAdminEmail ? "Admin" : "User";
+            const assignedStatus = isAdminEmail ? "Approved" : "Pending";
+            
+            const newProfile: UserProfile = {
+              uid: sbUser.id,
+              email: sbUser.email || "",
+              displayName: sbUser.user_metadata?.displayName || sbUser.user_metadata?.full_name || sbUser.email?.split("@")[0] || "User",
+              username: username,
+              role: assignedRole,
+              status: assignedStatus as any,
+              createdAt: new Date().toISOString()
+            };
+            
+            const { error: insertError } = await supabase
+              .from('users')
+              .upsert(newProfile);
+              
+            if (insertError) {
+              console.error("Supabase: Failed to auto-provision user profile on state change:", insertError);
+            }
+            userProfile = newProfile;
+          }
+          setProfile(userProfile);
+        } else {
+          setUser(null);
+          setProfile(null);
+        }
+      } catch (err) {
+        console.error("Session State Change Handler Error:", err);
       } finally {
         setLoading(false);
       }
     });
-    return () => unsubscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
+      await signInWithGoogle();
     } catch (err: any) {
       console.error("Login Error:", err);
       throw err;
@@ -150,131 +204,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signInWithEmail = async (emailOrUsername: string, pass: string) => {
-    let emailToUse = emailOrUsername;
-    if (!emailOrUsername.includes("@")) {
-      const q = query(collection(db, "user_mappings"), where("username", "==", emailOrUsername.toLowerCase()));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        emailToUse = snap.docs[0].data().email;
-      } else {
-        throw createAuthError("auth/user-not-found");
+    try {
+      await sbSignInWithEmail(emailOrUsername, pass);
+    } catch (err: any) {
+      console.error("Sign in with email error:", err);
+      if (err.message?.includes('not found') || err.message?.includes('Invalid login credentials')) {
+        throw createAuthError("auth/user-not-found", "Invalid email/username or password.");
       }
+      throw err;
     }
-    await signInWithEmailAndPassword(auth, emailToUse, pass);
   };
 
-  const signUpWithEmail = async (email: string, pass: string, name: string, username: string, targetRole: UserRole = "User", linkedPropertyIds?: string[]) => {
-    const q = query(collection(db, "user_mappings"), where("username", "==", username.toLowerCase()));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      throw createAuthError("auth/username-already-in-use");
+  const signUpWithEmail = async (
+    email: string,
+    pass: string,
+    name: string,
+    username: string,
+    targetRole: UserRole = "User",
+    linkedPropertyIds?: string[],
+    designation?: string
+  ) => {
+    try {
+      await sbSignUpWithEmail(email, pass, name, username, targetRole, linkedPropertyIds, designation);
+    } catch (err: any) {
+      if (err.message === "Username already in use.") {
+        throw createAuthError("auth/username-already-in-use", err.message);
+      }
+      throw err;
     }
-
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    const isAdminEmail = email === "marzanleonardojrc@gmail.com" || email === "marzan.leonardo04@gmail.com";
-    const assignedRole = isAdminEmail ? "Admin" : targetRole;
-    const assignedStatus = (isAdminEmail || targetRole === "Taxpayer") ? "Approved" : "Pending";
-
-    const newProfile: any = {
-      uid: cred.user.uid,
-      email,
-      displayName: name,
-      username: username.toLowerCase(),
-      role: assignedRole,
-      status: assignedStatus,
-      createdAt: serverTimestamp()
-    };
-    if (linkedPropertyIds) {
-      newProfile.linkedPropertyIds = linkedPropertyIds;
-    }
-    await setDoc(doc(db, "users", cred.user.uid), newProfile);
-    await setDoc(doc(db, "user_mappings", username.toLowerCase()), {
-      username: username.toLowerCase(),
-      email: email
-    });
-    await updateProfile(cred.user, { displayName: name });
   };
   
   const updateUserName = async (name: string) => {
-    if (!auth.currentUser) return;
-    await updateProfile(auth.currentUser, { displayName: name });
-    await updateDoc(doc(db, "users", auth.currentUser.uid), { displayName: name });
-    // Profile will be updated by onAuthStateChanged/doc listener if we use a listener, 
-    // but here we just manually update for immediate feedback
+    await sbUpdateUserName(name);
     setProfile(p => p ? { ...p, displayName: name } : null);
   };
 
   const updateUserUsername = async (username: string) => {
-    if (!auth.currentUser || !profile) return;
-    
     const formattedUsername = username.replace(/\s+/g, '').toLowerCase();
-    
-    // Check if new username is available
-    let snap;
-    try {
-      const q = query(collection(db, "user_mappings"), where("username", "==", formattedUsername));
-      snap = await getDocs(q);
-    } catch(err: any) {
-      console.error("user_mappings getDocs failed:", err);
-      throw new Error(`getDocs user_mappings: ${err.message}`);
-    }
-    if (!snap.empty && snap.docs[0].id !== formattedUsername) {
-      throw createAuthError("auth/username-already-in-use");
-    }
-
-    // Delete old mapping if exists
-    if (profile.username) {
-       try {
-         await deleteDoc(doc(db, "user_mappings", profile.username));
-       } catch(err: any) {
-         console.error("deleteDoc on user_mappings failed:", err);
-         throw new Error(`deleteDoc user_mappings: ${err.message}`);
-       }
-    }
-    
-    // Add new mapping
-    try {
-      await setDoc(doc(db, "user_mappings", formattedUsername), {
-        username: formattedUsername,
-        email: auth.currentUser.email
-      });
-    } catch(err: any) {
-      console.error("setDoc on user_mappings failed:", err);
-      throw new Error(`setDoc user_mappings: ${err.message}`);
-    }
-    
-    // Update users doc
-    try {
-      await updateDoc(doc(db, "users", auth.currentUser.uid), { username: formattedUsername });
-    } catch(err: any) {
-      console.error("updateDoc on users failed:", err);
-      throw new Error(`updateDoc users: ${err.message}`);
-    }
-    
+    await sbUpdateUserUsername(formattedUsername);
     setProfile(p => p ? { ...p, username: formattedUsername } : null);
   };
 
   const updateUserPassword = async (pass: string) => {
-    if (!auth.currentUser) return;
-    await updatePassword(auth.currentUser, pass);
+    await sbUpdateUserPassword(pass);
   };
 
   const resetPassword = async (emailOrUsername: string) => {
-    let emailToUse = emailOrUsername;
-    if (!emailOrUsername.includes("@")) {
-      const q = query(collection(db, "user_mappings"), where("username", "==", emailOrUsername.toLowerCase()));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        emailToUse = snap.docs[0].data().email;
-      } else {
-        throw createAuthError("auth/user-not-found");
+    try {
+      await sbResetPassword(emailOrUsername);
+    } catch (err: any) {
+      if (err.message === "User with this username not found.") {
+        throw createAuthError("auth/user-not-found", err.message);
       }
+      throw err;
     }
-    await sendPasswordResetEmail(auth, emailToUse);
   };
 
   const logout = async () => {
-    await signOut(auth);
+    await sbLogout();
     setUser(null);
     setProfile(null);
   };
@@ -296,6 +283,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateUserPassword,
       logout,
       isOffline,
+      isQuotaExceeded,
       isAdmin: (isApproved && profile?.role === "Admin") || isAdminEmail,
       isEncoder: (isApproved && (profile?.role === "Admin" || profile?.role === "User" || profile?.role === "End-User")) || isAdminEmail,
       isGuest: isApproved && profile?.role === "Guest" && !isAdminEmail,

@@ -17,8 +17,7 @@ import {
   EyeOff
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { db, auth } from "../lib/firebase";
-import { collection, getDocs, query, where, setDoc, doc, getDoc } from "firebase/firestore";
+import { supabase } from "../lib/supabase";
 
 type AccessRole = "Resident" | "Staff" | "Administrator";
 
@@ -42,12 +41,13 @@ const Login: React.FC = () => {
     password: ""
   });
 
-  // Resident registration form values
+  // Resident/Staff registration form values
   const [regData, setRegData] = useState({
     fullName: "",
     email: "",
     username: "",
     password: "",
+    designation: "Treasury Tax Encoder",
     tdNumber: "",
     pin: "",
     assessedValue: ""
@@ -77,12 +77,20 @@ const Login: React.FC = () => {
         await signInWithEmail(loginData.usernameOrEmail, loginData.password);
         
         // Retrieve newly logged-in user details to verify role authorization strictly
-        const currentUser = auth.currentUser;
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = session?.user;
         if (currentUser) {
           const isAdminEmail = currentUser.email === "marzanleonardojrc@gmail.com" || currentUser.email === "marzan.leonardo04@gmail.com";
-          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-          if (userDoc.exists()) {
-            const profileData = userDoc.data();
+          
+          const { data: profileData, error: profileError } = await supabase
+            .from("users")
+            .select("*")
+            .eq("uid", currentUser.id)
+            .maybeSingle();
+
+          if (profileError) throw profileError;
+
+          if (profileData) {
             const realRole = profileData.role;
 
             // Strict alignment validation of chosen Role Selector vs actual identity database role
@@ -104,21 +112,8 @@ const Login: React.FC = () => {
       }
     } catch (err: any) {
       console.error(err);
-      const errorCode = err.code || "";
       const errorMsg = err.message || "";
-      
-      if (
-        errorCode === "auth/invalid-credential" || 
-        errorCode === "auth/wrong-password" || 
-        errorCode === "auth/user-not-found" || 
-        errorMsg.includes("invalid-credential") || 
-        errorMsg.includes("wrong-password") || 
-        errorMsg.includes("user-not-found")
-      ) {
-        setError("Invalid credentials. Please verify your email/username and password.");
-      } else {
-        setError(errorMsg || "Authentication failed. Clear your session and retry.");
-      }
+      setError(errorMsg || "Authentication failed. Clear your session and retry.");
     } finally {
       setLoading(false);
     }
@@ -131,100 +126,53 @@ const Login: React.FC = () => {
     setMsg(null);
 
     try {
-      // 1. Validation checks
-      const assessedValNum = parseFloat(regData.assessedValue);
-      if (isNaN(assessedValNum) || assessedValNum <= 0) {
-        throw new Error("Invalid Assessed Value. Please specify a positive number as indicated in your official Assessor's Tax Declaration sheet.");
+      if (!regData.fullName.trim()) {
+        throw new Error("Full name is required.");
+      }
+      if (!regData.username.trim()) {
+        throw new Error("Username is required.");
+      }
+      if (!regData.email.trim()) {
+        throw new Error("Work email is required.");
+      }
+      if (!regData.password || regData.password.length < 6) {
+        throw new Error("Password must be at least 6 characters.");
       }
 
-      if (!regData.tdNumber && !regData.pin) {
-        throw new Error("Verification requires either an official PIN (Property Index Number) or TDN (Tax Declaration Number).");
-      }
-
-      // 2. Query Firestore properties collection
-      const propertiesRef = collection(db, "properties");
-      const snapProps = await getDocs(propertiesRef);
-
-      // Clean inputs for flexible, typo-tolerant, yet highly secure assessment matches
-      const cleanInputName = regData.fullName.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-      const matchedProp = snapProps.docs.find(doc => {
-        const p = doc.data();
-        if (p.isArchived) return false;
-
-        // Match assessment exact values
-        const matchesAssessedVal = Math.abs(p.assessedValue - assessedValNum) < 1; // absolute tolerance within 1 peso
-        
-        // Clean database strings
-        const cleanDbOwnerName = (p.ownerName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const matchesOwner = cleanDbOwnerName.includes(cleanInputName) || cleanInputName.includes(cleanDbOwnerName);
-
-        // Verification numbers matching (one or both must match if provided)
-        const matchesTdn = regData.tdNumber && p.tdNumber
-          ? p.tdNumber.trim().toLowerCase() === regData.tdNumber.trim().toLowerCase()
-          : false;
-
-        const matchesPin = regData.pin && p.pin
-          ? p.pin.trim().toLowerCase() === regData.pin.trim().toLowerCase()
-          : false;
-
-        return matchesOwner && matchesAssessedVal && (matchesTdn || matchesPin);
-      });
-
-      if (!matchedProp) {
-        throw new Error(
-          "Security Verification Failed. The provided combination of Taxpayer Name, TDN/PIN, and Assessed Value does not match any official property record in our active registry database. Registration blocked."
-        );
-      }
-
-      const pData = matchedProp.data();
-
-      // 3. Register user profile via standard signUpWithEmail
-      const emailToUse = regData.email.trim() 
-        ? regData.email.trim() 
-        : `${regData.username.trim().toLowerCase()}@rpt.dipaculao.gov`;
-
+      // 1. Register staff profile via our standard signUpWithEmail helper
+      // This will automatically put them as 'Pending' and also create their staff_profiles entry.
       await signUpWithEmail(
-        emailToUse,
+        regData.email.trim(),
         regData.password,
         regData.fullName.trim(),
         regData.username.trim().toLowerCase(),
-        "Taxpayer",
-        [matchedProp.id]
+        "User", // Standard User role for Staff
+        [], // No linked properties for Staff
+        regData.designation || "Treasury Tax Encoder"
       );
 
-      // 4. Record dynamic login identifier / mapping for TDN logins
-      if (regData.tdNumber) {
-        await setDoc(doc(db, "user_mappings", regData.tdNumber.trim().toLowerCase()), {
-          username: regData.tdNumber.trim().toLowerCase(),
-          email: emailToUse
-        });
-      }
-
-      // 5. Build secure Audit log entry for tracking links
-      const auditId = Math.random().toString(36).substring(2, 15);
-      await setDoc(doc(db, "audit_logs", auditId), {
-        id: auditId,
-        userId: "system-registration",
-        userEmail: emailToUse,
+      // 2. Build secure Audit log entry for tracking staff registrations
+      const { error: auditError } = await supabase.from("audit_logs").insert({
         action: "CREATE",
-        entityId: matchedProp.id,
-        entityType: "TaxpayerRegistration",
-        newValue: {
-          email: emailToUse,
+        user_id: null,
+        entity_id: regData.username.trim().toLowerCase(),
+        entity_type: "StaffRegistration",
+        new_value: {
+          email: regData.email.trim(),
           displayName: regData.fullName.trim(),
-          role: "Taxpayer",
-          linkedPropertyId: matchedProp.id,
-          verifiedTdn: regData.tdNumber,
-          verifiedPin: regData.pin,
-          verifiedAssessedVal: assessedValNum
+          designation: regData.designation || "Treasury Tax Encoder",
+          role: "User",
+          status: "Pending"
         },
         timestamp: new Date().toISOString()
       });
 
-      setMsg(`Success! Welcome ${regData.fullName}. Your resident portal account is fully registered and linked to Property TDN: ${pData.tdNumber}! Establishing secure node...`);
+      if (auditError) {
+        console.warn("Failed to create audit log during staff registration:", auditError);
+      }
+
+      setMsg(`Success! Your Staff Account request has been submitted and is currently PENDING. An Administrator must review and approve your account before you can log in.`);
       
-      // Auto redirect triggers via profile observer
     } catch (err: any) {
       console.error(err);
       setError(err.message || "An unexpected registration error occurred. Verify inputs and try again.");
@@ -325,9 +273,8 @@ const Login: React.FC = () => {
               })}
             </div>
 
-            <AnimatePresence mode="wait">
-              {isRegistering ? (
-                /* RESIDENT PORTAL REGISTRATION */
+            <AnimatePresence mode="wait">              {isRegistering ? (
+                /* STAFF ACCOUNT REGISTRATION */
                 <motion.form 
                   key="registration"
                   initial={{ opacity: 0, x: 20 }}
@@ -337,8 +284,8 @@ const Login: React.FC = () => {
                   className="space-y-4"
                 >
                   <div className="border-b border-slate-800 pb-3 mb-2">
-                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Resident Real Property Link Registration</h3>
-                    <p className="text-[10px] text-slate-500 mt-1">Provide your details and Assessed values to link your tax profile seamlessly.</p>
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Staff Account Registration</h3>
+                    <p className="text-[10px] text-slate-500 mt-1">Provide your details to submit a Staff registration request. Accounts remain Pending until Administrator approval.</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -347,7 +294,7 @@ const Login: React.FC = () => {
                       <input
                         required
                         type="text"
-                        placeholder="Taxpayer Registered Name"
+                        placeholder="e.g. Maria Santos"
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
                         value={regData.fullName}
                         onChange={e => setRegData(p => ({ ...p, fullName: e.target.value }))}
@@ -355,10 +302,11 @@ const Login: React.FC = () => {
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-sans">Email Address (Optional / Gmail not required)</label>
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-sans">Work Email *</label>
                       <input
+                        required
                         type="email"
-                        placeholder="Offline: system will auto-generate if empty"
+                        placeholder="e.g. maria.santos@dipaculao.gov"
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
                         value={regData.email}
                         onChange={e => setRegData(p => ({ ...p, email: e.target.value }))}
@@ -392,50 +340,22 @@ const Login: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
-                    <h3 className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
-                      <FileText className="w-3.5 h-3.5" />
-                      Tax Registry Match Inputs
-                    </h3>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pb-1">
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-slate-550 uppercase tracking-wider block font-mono">Tax Decl. Number (TDN)</label>
-                        <input
-                          type="text"
-                          placeholder="e.g. TD-2025-0012"
-                          className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
-                          value={regData.tdNumber}
-                          onChange={e => setRegData(p => ({ ...p, tdNumber: e.target.value }))}
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] font-black text-slate-550 uppercase tracking-wider block font-mono">Property Index No. (PIN)</label>
-                        <input
-                          type="text"
-                          placeholder="e.g. 012-04-001..."
-                          className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
-                          value={regData.pin}
-                          onChange={e => setRegData(p => ({ ...p, pin: e.target.value }))}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between items-center pr-1">
-                        <label className="text-[9px] font-black text-slate-550 uppercase tracking-wider block font-sans">Official Assessed Value (₱) *</label>
-                        <span className="text-[8px] text-blue-400 font-bold uppercase block tracking-wider">Strict Security Check Target</span>
-                      </div>
-                      <input
-                        required
-                        type="number"
-                        placeholder="Exact number from Assessor's Declaration (e.g., 24000)"
-                        className="w-full bg-slate-950 border border-slate-850 rounded-xl py-3 px-3 text-xs text-white font-mono focus:outline-none focus:border-blue-500 transition-colors"
-                        value={regData.assessedValue}
-                        onChange={e => setRegData(p => ({ ...p, assessedValue: e.target.value }))}
-                      />
-                    </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-sans">Municipal Office / Staff Designation *</label>
+                    <select
+                      value={regData.designation}
+                      onChange={e => setRegData(p => ({ ...p, designation: e.target.value }))}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-3.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors cursor-pointer font-sans"
+                    >
+                      <option value="Treasury Tax Encoder">Treasury Tax Encoder (Default)</option>
+                      <option value="Revenue Collection Officer">Revenue Collection Officer</option>
+                      <option value="Assessor Assessment Staff">Assessor Assessment Staff</option>
+                      <option value="Real Property Examiner">Real Property Examiner</option>
+                      <option value="Municipal Treasurer / Deputy">Municipal Treasurer / Deputy</option>
+                      <option value="COA Resident Auditor">COA Resident Auditor</option>
+                      <option value="IT & Records Administrator">IT & Records Administrator</option>
+                      <option value="General Municipal Staff">General Municipal Staff</option>
+                    </select>
                   </div>
 
                   {error && (
@@ -461,7 +381,7 @@ const Login: React.FC = () => {
                       <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
                     ) : (
                       <>
-                        <span>Verify registry & Link profile</span>
+                        <span>Submit Staff Registration</span>
                         <ArrowRight className="w-4 h-4" />
                       </>
                     )}
@@ -473,7 +393,7 @@ const Login: React.FC = () => {
                       onClick={() => { setIsRegistering(false); setError(null); setMsg(null); }}
                       className="text-blue-400 hover:text-blue-300 font-bold text-[10px] uppercase tracking-widest"
                     >
-                      &larr; Already Registered? Return to Login
+                      &larr; Return to Login
                     </button>
                   </div>
                 </motion.form>
@@ -579,6 +499,25 @@ const Login: React.FC = () => {
                       </>
                     )}
                   </button>
+
+                  {selectedRole === "Staff" && !isResetting && (
+                    <div className="text-center pt-2">
+                      <p className="text-[10px] text-slate-400">
+                        New Staff Member?{" "}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsRegistering(true);
+                            setError(null);
+                            setMsg(null);
+                          }}
+                          className="text-blue-400 hover:text-blue-300 font-bold uppercase tracking-wider cursor-pointer"
+                        >
+                          Register Staff Account &rarr;
+                        </button>
+                      </p>
+                    </div>
+                  )}
 
 
 

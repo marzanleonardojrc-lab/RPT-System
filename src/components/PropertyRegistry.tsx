@@ -79,15 +79,19 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
   const [viewingProperty, setViewingProperty] = useState<Property | null>(null);
   const [adminAuthDialog, setAdminAuthDialog] = useState<{isOpen: boolean, property: Property | null}>({isOpen: false, property: null});
   const [errors, setErrors] = useState<Record<string, string>>({});
-
+  const [pendingDeleteReason, setPendingDeleteReason] = useState<string>("");
 
   // Dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
     message: string;
-    onConfirm: () => void;
+    onConfirm: (reason?: string) => void;
     type?: "danger" | "warning" | "info" | "success";
+    showInput?: boolean;
+    inputPlaceholder?: string;
+    inputLabel?: string;
+    requiredInput?: boolean;
   }>({
     isOpen: false,
     title: "",
@@ -333,30 +337,125 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
     }
   };
 
+  const notifyTaxpayerOfPropertyArchival = async (property: Property, reason: string) => {
+    try {
+      const tdnStr = property.tdNumber || "22-09-001-00054";
+      const noticeSubject = `Notice: Registered Property TD No. ${tdnStr} Archived`;
+      const noticeMessage = `OFFICIAL NOTICE FROM MUNICIPAL ASSESSOR & TREASURY:\n\nYour registered real property record under Tax Declaration Number "${tdnStr}" (PIN: ${property.pin || 'N/A'}, Owner: ${property.ownerName || 'N/A'}) has been archived from active tax records due to re-assessment or record adjustment.\n\nReason / Remarks: "${reason || 'Property archived by Assessor / Treasury'}"\n\nIf you have questions or require re-assessment, please reply directly to this notice thread or visit the Dipaculao Municipal Assessor's office.`;
+
+      // 1. Search for resident users associated with this property
+      const usersSnap = await getDocs(collection(db, "users"));
+      const matchingUsers = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() } as any))
+        .filter(u => {
+          const linked = u.linkedPropertyIds || [];
+          const isLinked = linked.includes(property.id);
+          const isOwner = u.displayName && property.ownerName && u.displayName.toLowerCase().trim() === property.ownerName.toLowerCase().trim();
+          const isUsernameMatch = u.username && tdnStr && u.username.toLowerCase().replace(/[^a-z0-9]/g, '') === tdnStr.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return isLinked || isOwner || isUsernameMatch;
+        });
+
+      if (matchingUsers.length > 0) {
+        for (const user of matchingUsers) {
+          await addDoc(collection(db, "resident_queries"), {
+            userId: user.uid,
+            userName: user.displayName || user.email,
+            userEmail: user.email || "",
+            category: "Tax Assessment",
+            subject: noticeSubject,
+            message: noticeMessage,
+            propertyTdn: tdnStr,
+            propertyPin: property.pin || "",
+            status: "Responded",
+            adminResponse: `Property TD No. ${tdnStr} archived on ${new Date().toLocaleDateString()}. Reason: ${reason}`,
+            respondedBy: profile?.displayName || profile?.email || "Municipal Assessor Administrator",
+            respondedAt: new Date().toISOString(),
+            replies: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+        }
+      } else {
+        // System broadcast query record for matching TDN
+        await addDoc(collection(db, "resident_queries"), {
+          userId: "SYSTEM_BROADCAST",
+          userName: property.ownerName || "Property Taxpayer",
+          userEmail: `${tdnStr.replace(/[^a-z0-9]/g, '').toLowerCase()}@rpt.dipaculao.gov`,
+          category: "Tax Assessment",
+          subject: noticeSubject,
+          message: noticeMessage,
+          propertyTdn: tdnStr,
+          propertyPin: property.pin || "",
+          status: "Responded",
+          adminResponse: `Property TD No. ${tdnStr} archived on ${new Date().toLocaleDateString()}. Reason: ${reason}`,
+          respondedBy: profile?.displayName || profile?.email || "Municipal Assessor Administrator",
+          respondedAt: new Date().toISOString(),
+          replies: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      // 2. Also record in property_archival_notices
+      await addDoc(collection(db, "property_archival_notices"), {
+        propertyId: property.id,
+        tdNumber: tdnStr,
+        pin: property.pin || "",
+        ownerName: property.ownerName || "",
+        reason: reason,
+        archivedBy: profile?.displayName || profile?.email || "Municipal Assessor Administrator",
+        archivedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Failed to post taxpayer property archival notification:", err);
+    }
+  };
+
   const handleDeleteProperty = async (property: Property) => {
     if (activeTab === 'Active') {
       setConfirmDialog({
         isOpen: true,
-        title: "Archive Property?",
-        message: `You are about to archive the property with Tax Dec No: "${property.tdNumber}" belonging to "${property.ownerName}".\n\nIt will be moved to the Archive tab and its delinquencies will be hidden from the ledger. Are you sure you want to proceed?`,
+        title: "Archive Property Record?",
+        message: `You are about to archive property with Tax Dec No: "${property.tdNumber}" belonging to "${property.ownerName}".\n\nThe taxpayer using that account will be automatically notified with your official remarks.`,
         type: "warning",
-        onConfirm: async () => {
+        showInput: true,
+        requiredInput: true,
+        inputPlaceholder: "State official reason for archiving (e.g. Land consolidation, Property transfer, Re-assessment)...",
+        inputLabel: "Remarks / Reason for Archiving (Required):",
+        onConfirm: async (reason?: string) => {
+          const finalReason = reason || "Property archived due to re-assessment";
           try {
             await updateDoc(doc(db, "properties", property.id), {
               isArchived: true,
+              archiveReason: finalReason,
+              archivedBy: profile?.displayName || profile?.email || "Admin",
               archivedAt: new Date().toISOString(),
               updatedAt: serverTimestamp()
             });
-            await logAudit("UPDATE", "Property", property.id, property, { isArchived: true });
+            await logAudit("UPDATE", "PropertyArchive", property.id, property, { isArchived: true, archiveReason: finalReason });
+            await notifyTaxpayerOfPropertyArchival(property, finalReason);
           } catch (err) {
             handleFirestoreError(err, OperationType.UPDATE, "properties");
           }
         }
       });
     } else {
-      setAdminAuthDialog({
+      setConfirmDialog({
         isOpen: true,
-        property,
+        title: "Permanently Delete & Archive Property?",
+        message: `You are about to permanently delete and archive property with Tax Dec No: "${property.tdNumber}".\n\nBefore admin authorization, state official remarks. The taxpayer will be notified that property ${property.tdNumber} has been archived due to this reason.`,
+        type: "danger",
+        showInput: true,
+        requiredInput: true,
+        inputPlaceholder: "State official reason for permanent deletion / archiving...",
+        inputLabel: "Remarks / Reason for Permanent Removal (Required):",
+        onConfirm: async (reason?: string) => {
+          const finalReason = reason || "Permanently archived and deleted by Municipal Assessor";
+          setPendingDeleteReason(finalReason);
+          setAdminAuthDialog({
+            isOpen: true,
+            property,
+          });
+        }
       });
     }
   };
@@ -364,11 +463,15 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
   const handlePermanentDeleteConfirm = async () => {
     if (!adminAuthDialog.property) return;
     const property = adminAuthDialog.property;
+    const finalReason = pendingDeleteReason || "Permanently archived and deleted by Municipal Assessor";
     setAdminAuthDialog({ isOpen: false, property: null });
 
     try {
       const batch = writeBatch(db);
       
+      // Send notification to taxpayer
+      await notifyTaxpayerOfPropertyArchival(property, finalReason);
+
       // Find delinquencies and delete them
       const delinqQuery = query(collection(db, "delinquencies"), where("propertyId", "==", property.id));
       const delinqSnap = await getDocs(delinqQuery);
@@ -390,8 +493,15 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
         batch.delete(doc(db, "taxpayer_requests", r.id));
       }
 
-      // Delete property
-      batch.delete(doc(db, "properties", property.id));
+      // Mark property as permanently archived and deleted with reason
+      batch.update(doc(db, "properties", property.id), {
+        isArchived: true,
+        isPermanentlyDeleted: true,
+        archiveReason: finalReason,
+        archivedBy: profile?.displayName || profile?.email || "Admin",
+        archivedAt: new Date().toISOString(),
+        updatedAt: serverTimestamp()
+      });
 
       // Commit the transaction
       await batch.commit();
@@ -400,7 +510,7 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
       for (const d of delinqSnap.docs) await logAudit("DELETE", "Delinquency", d.id, d.data(), null);
       for (const p of paymentsSnap.docs) await logAudit("DELETE", "Payment", p.id, p.data(), null);
       for (const r of reqSnap.docs) await logAudit("DELETE", "TaxpayerRequest", r.id, r.data(), null);
-      await logAudit("DELETE", "Property", property.id, property, null);
+      await logAudit("DELETE", "Property", property.id, property, { archiveReason: finalReason });
 
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, "properties");
@@ -554,35 +664,43 @@ const PropertyRegistry: React.FC<PropertyRegistryProps> = ({
         title={confirmDialog.title}
         message={confirmDialog.message}
         type={confirmDialog.type}
+        showInput={confirmDialog.showInput}
+        inputPlaceholder={confirmDialog.inputPlaceholder}
+        inputLabel={confirmDialog.inputLabel}
+        requiredInput={confirmDialog.requiredInput}
       />
       <AdminAuthDialog 
         isOpen={adminAuthDialog.isOpen}
         onClose={() => setAdminAuthDialog({ isOpen: false, property: null })}
         onConfirm={handlePermanentDeleteConfirm}
       />
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-sm">
         <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">
+          <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+            <Building2 className="w-4 h-4" />
+            <span>Assessment & Property Management</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">
             {activeTab === 'Archived' ? "Property Archive" : "Property Registry"}
-          </h2>
-          <p className="text-slate-500 text-sm mt-1">
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
             {activeTab === 'Archived' 
-              ? "Repository for archived and inactive real property records." 
-              : "Central node for all registered real estate identifiers."}
+              ? "Repository for archived and inactive real property units and tax declaration records." 
+              : "Central database for registered real property units, tax declarations, and PIN references."}
           </p>
         </div>
         {activeTab !== 'Archived' && isEncoder && !isAdding && (
-          <div className="flex gap-3">
+          <div className="flex items-center gap-3 shrink-0">
              <button 
               onClick={() => setIsImporting(true)}
-              className="flex items-center gap-2 px-4 py-2 border border-blue-500/30 text-blue-400 rounded-lg hover:bg-blue-500/10 transition font-bold text-xs uppercase tracking-wider"
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 border border-blue-500/30 text-blue-400 rounded-2xl hover:bg-blue-500/10 transition font-bold text-xs uppercase tracking-wider"
             >
               <Upload className="w-4 h-4" />
               Migrate Data
             </button>
             <button 
               onClick={() => setIsAdding(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition shadow-lg shadow-blue-500/20 font-bold text-xs uppercase tracking-wider"
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-2xl hover:bg-blue-500 transition shadow-lg shadow-blue-500/20 font-bold text-xs uppercase tracking-wider"
             >
               <Plus className="w-4 h-4" />
               Register Property

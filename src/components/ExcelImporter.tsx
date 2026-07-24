@@ -158,7 +158,15 @@ const ExcelImporter: React.FC<ImporterProps> = ({ onClose }) => {
       "280000"
     ];
 
-    const csvContent = [headers.join(","), sampleRow.join(",")].join("\n");
+    const escapeCSV = (val: string) => {
+      const str = String(val);
+      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const csvContent = [headers.join(","), sampleRow.map(escapeCSV).join(",")].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

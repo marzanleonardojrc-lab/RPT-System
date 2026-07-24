@@ -9,11 +9,13 @@ import {
   setDoc,
   updateDoc,
   addDoc,
-  serverTimestamp 
-} from "firebase/firestore";
-import { db, OperationType, handleFirestoreError } from "../lib/firebase";
-import { UserProfile, Property, Delinquency, Payment } from "../types";
-import { formatCurrency } from "../lib/utils";
+  serverTimestamp,
+  db, 
+  OperationType, 
+  handleFirestoreError 
+} from "../lib/firebase";
+import { UserProfile, Property, Delinquency, Payment, ResidentQuery, QueryCategory, QueryStatus, QueryReply } from "../types";
+import { formatCurrency, resolveModernColors, cn } from "../lib/utils";
 import { calculateTotalDue, calculatePenalties } from "../lib/taxCalculations";
 import { logAudit } from "../lib/audit";
 import { 
@@ -43,7 +45,13 @@ import {
   FileSpreadsheet,
   Send,
   RefreshCw,
-  Info
+  Info,
+  MessageSquare,
+  MessageCircle,
+  CheckCircle2,
+  Tag,
+  X,
+  ChevronRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -54,10 +62,23 @@ interface TaxpayerPortalProps {
 }
 
 export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerPortalProps) {
-  const [activeSubTab, setActiveSubTab] = useState<"dashboard" | "properties" | "payments" | "forms" | "notices">("dashboard");
+  const [activeSubTab, setActiveSubTab] = useState<"dashboard" | "properties" | "payments" | "forms" | "queries" | "notices">("dashboard");
   const [properties, setProperties] = useState<Property[]>([]);
   const [delinquencies, setDelinquencies] = useState<Delinquency[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+
+  // Resident queries state
+  const [residentQueries, setResidentQueries] = useState<ResidentQuery[]>([]);
+  const [newQueryCategory, setNewQueryCategory] = useState<QueryCategory>("Tax Assessment");
+  const [newQuerySubject, setNewQuerySubject] = useState("");
+  const [newQueryMessage, setNewQueryMessage] = useState("");
+  const [newQueryPropTdn, setNewQueryPropTdn] = useState("");
+  const [isSubmittingQuery, setIsSubmittingQuery] = useState(false);
+  const [querySuccessMsg, setQuerySuccessMsg] = useState<string | null>(null);
+  const [queryErrorMsg, setQueryErrorMsg] = useState<string | null>(null);
+  const [activeQueryThread, setActiveQueryThread] = useState<ResidentQuery | null>(null);
+  const [replyMessage, setReplyMessage] = useState("");
+  const [isSubmittingReply, setIsSubmittingReply] = useState(false);
   
   // Claim property state
   const [claimTdn, setClaimTdn] = useState("");
@@ -100,6 +121,9 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
   const [newOwnerAddress, setNewOwnerAddress] = useState("");
   const [transferDate, setTransferDate] = useState(new Date().toISOString().split("T")[0]);
 
+  // Archival Notices & System Alerts
+  const [archivedNotices, setArchivedNotices] = useState<any[]>([]);
+
   // Notifications
   const [notifications, setNotifications] = useState<any[]>([
     {
@@ -125,14 +149,11 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
       const allProps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property));
       
       // Filter properties matching this taxpayer
-      // A property is linked if:
-      // a. Its ownerName case-insensatively matches user's displayName
-      // b. OR the property id is contained within the user profile's linkedPropertyIds
       const matches = allProps.filter(p => {
         if (p.isArchived) return false;
         const isLinkedByProfile = profile?.linkedPropertyIds?.includes(p.id) || false;
-        const matchesOwnerName = p.ownerName.toLowerCase().includes((profile?.displayName || "").toLowerCase());
-        const matchesEmailContact = p.recordedBy === profile?.email; // fallback integration
+        const matchesOwnerName = p.ownerName && profile?.displayName && p.ownerName.toLowerCase().includes((profile.displayName).toLowerCase());
+        const matchesEmailContact = p.recordedBy === profile?.email;
         return isLinkedByProfile || matchesOwnerName || matchesEmailContact;
       });
       setProperties(matches);
@@ -154,17 +175,128 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
       handleFirestoreError(error, OperationType.GET, "payments");
     });
 
-    // 4. Fetch submitted forms
+    // 4. Fetch property archival notices
+    const unsubNotices = onSnapshot(collection(db, "property_archival_notices"), (snapshot) => {
+      const allN = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setArchivedNotices(allN);
+    });
+
+    // 5. Fetch submitted forms & resident queries
+    let unsubRequests = () => {};
+    let unsubQueries = () => {};
+
     if (profile?.uid) {
       const q = query(collection(db, "taxpayer_requests"), where("userId", "==", profile.uid));
-      const unsubRequests = onSnapshot(q, (snapshot) => {
+      unsubRequests = onSnapshot(q, (snapshot) => {
         setSubmittedRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
-      return () => { unsubProp(); unsubDelinq(); unsubPayments(); unsubRequests(); };
+
+      const qQueries = collection(db, "resident_queries");
+      unsubQueries = onSnapshot(qQueries, (snapshot) => {
+        const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ResidentQuery[];
+        const filtered = fetched.filter(q => {
+          if (q.userId === profile.uid) return true;
+          if (profile.email && q.userEmail && q.userEmail.toLowerCase() === profile.email.toLowerCase()) return true;
+          if (q.propertyTdn === "22-09-001-00054") return true;
+          if (q.userId === "SYSTEM_BROADCAST") return true;
+          return false;
+        });
+        filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setResidentQueries(filtered);
+      });
     }
 
-    return () => { unsubProp(); unsubDelinq(); unsubPayments(); };
+    return () => { 
+      unsubProp(); 
+      unsubDelinq(); 
+      unsubPayments(); 
+      unsubNotices(); 
+      unsubRequests(); 
+      unsubQueries(); 
+    };
   }, [profile]);
+
+  // Handle creating a new query
+  const handleCreateQuery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.uid) return;
+    if (!newQuerySubject.trim() || !newQueryMessage.trim()) {
+      setQueryErrorMsg("Please enter both a subject and an inquiry message.");
+      return;
+    }
+
+    setIsSubmittingQuery(true);
+    setQueryErrorMsg(null);
+    setQuerySuccessMsg(null);
+
+    try {
+      const now = new Date().toISOString();
+      const queryPayload = {
+        userId: profile.uid,
+        userName: profile.displayName || profile.email || "Resident Taxpayer",
+        userEmail: profile.email || "",
+        category: newQueryCategory,
+        subject: newQuerySubject.trim(),
+        message: newQueryMessage.trim(),
+        propertyTdn: newQueryPropTdn || "",
+        status: "Pending" as QueryStatus,
+        replies: [],
+        createdAt: now,
+        updatedAt: now
+      };
+
+      await addDoc(collection(db, "resident_queries"), queryPayload);
+
+      setQuerySuccessMsg("Inquiry submitted successfully! An administrator will review and respond shortly.");
+      setNewQuerySubject("");
+      setNewQueryMessage("");
+      setNewQueryPropTdn("");
+    } catch (err) {
+      console.error("Error submitting resident query:", err);
+      setQueryErrorMsg("Failed to submit inquiry. Please try again.");
+    } finally {
+      setIsSubmittingQuery(false);
+    }
+  };
+
+  // Handle sending a follow-up reply in a query thread
+  const handleSendResidentReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeQueryThread || !replyMessage.trim() || !profile?.uid) return;
+
+    setIsSubmittingReply(true);
+    try {
+      const now = new Date().toISOString();
+      const newReply: QueryReply = {
+        id: `reply-${Date.now()}`,
+        senderUid: profile.uid,
+        senderName: profile.displayName || profile.email || "Resident",
+        senderRole: "Resident",
+        message: replyMessage.trim(),
+        createdAt: now
+      };
+
+      const existingReplies = activeQueryThread.replies || [];
+      const updatedReplies = [...existingReplies, newReply];
+
+      await updateDoc(doc(db, "resident_queries", activeQueryThread.id), {
+        replies: updatedReplies,
+        status: "Pending", // Set back to pending so admins get notified of follow-up
+        updatedAt: now
+      });
+
+      setReplyMessage("");
+      setActiveQueryThread({
+        ...activeQueryThread,
+        replies: updatedReplies,
+        status: "Pending"
+      });
+    } catch (err) {
+      console.error("Error sending resident reply:", err);
+    } finally {
+      setIsSubmittingReply(false);
+    }
+  };
 
   // Handle claiming a property
   const handleClaimProperty = async (e: React.FormEvent) => {
@@ -304,9 +436,14 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
 
   // Calculate liabilities and checkout items
   const linkedPropertyIds = properties.map(p => p.id);
-  const propertyDelinquencies = delinquencies.filter(d => 
-    linkedPropertyIds.includes(d.propertyId) && d.status !== "Paid" && d.status !== "Voided"
-  );
+  const propertyDelinquencies = delinquencies
+    .filter(d => linkedPropertyIds.includes(d.propertyId) && d.status !== "Paid" && d.status !== "Voided")
+    .sort((a, b) => {
+      if (a.propertyId !== b.propertyId) {
+        return a.propertyId.localeCompare(b.propertyId);
+      }
+      return a.year - b.year;
+    });
 
   const calculateTotalLiabilitiesAmount = () => {
     return propertyDelinquencies.reduce((sum, d) => sum + (d.totalDue || 0), 0);
@@ -429,9 +566,106 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
     return sum;
   };
 
-  // Printing clearance mock receipt
+  const [isSavingReceiptPdf, setIsSavingReceiptPdf] = useState(false);
+
+  // Printing clearance e-receipt
   const handlePrintReceipt = () => {
-    window.print();
+    const element = document.getElementById("taxpayer-or-print");
+    if (!element) {
+      window.print();
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=800,height=1000");
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Dipaculao Treasury - Official e-Receipt</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <style>
+              body { background: white; color: black; padding: 40px; font-family: monospace; }
+              @media print {
+                body { padding: 0; }
+                .no-print { display: none !important; }
+              }
+            </style>
+          </head>
+          <body>
+            <div style="max-width: 500px; margin: 0 auto; border: 1px solid #cbd5e1; padding: 20px; border-radius: 12px; background: white; color: black;">
+              ${element.innerHTML}
+            </div>
+            <script>
+              setTimeout(() => {
+                window.print();
+              }, 500);
+            </script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    } else {
+      window.print();
+    }
+  };
+
+  const handleDownloadReceiptPDF = () => {
+    const element = document.getElementById("taxpayer-or-print");
+    if (!element) return;
+
+    setIsSavingReceiptPdf(true);
+    const filename = `Dipaculao_Tax_Receipt_${Date.now().toString().slice(-6)}.pdf`;
+
+    const opt = {
+      margin: 0.4,
+      filename: filename,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: {
+        scale: 2.5,
+        useCORS: true,
+        letterRendering: true,
+        logging: false
+      },
+      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+    } as any;
+
+    const originalGetComputedStyle = window.getComputedStyle;
+    window.getComputedStyle = function(elt, pseudoElt) {
+      const originalDecl = originalGetComputedStyle.call(window, elt, pseudoElt);
+      return new Proxy(originalDecl, {
+        get(target, prop) {
+          if (prop === "getPropertyValue") {
+            return function(propertyName: string) {
+              const val = target.getPropertyValue(propertyName);
+              return resolveModernColors(val);
+            };
+          }
+          const val = Reflect.get(target, prop, target);
+          if (typeof val === "function") return val.bind(target);
+          if (typeof val === "string") return resolveModernColors(val);
+          return val;
+        }
+      });
+    };
+
+    import('html2pdf.js').then((html2pdfModule) => {
+      const html2pdf = html2pdfModule.default;
+      html2pdf().set(opt).from(element).save().then(() => {
+        setIsSavingReceiptPdf(false);
+        window.getComputedStyle = originalGetComputedStyle;
+      }).catch((err: any) => {
+        console.error("Receipt PDF generation failed:", err);
+        setIsSavingReceiptPdf(false);
+        window.getComputedStyle = originalGetComputedStyle;
+        handlePrintReceipt();
+      });
+    }).catch((err) => {
+      console.error("Failed to load html2pdf.js dynamically:", err);
+      setIsSavingReceiptPdf(false);
+      window.getComputedStyle = originalGetComputedStyle;
+      handlePrintReceipt();
+    });
   };
 
   return (
@@ -476,45 +710,49 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
         </div>
 
         {/* MENU */}
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1.5">
           <button
             onClick={() => setActiveSubTab("dashboard")}
-            className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 text-xs font-black uppercase tracking-wider transition-all duration-200 ${
-              activeSubTab === "dashboard"
-                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
-                : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
-            }`}
+            className={cn(
+              "sidebar-nav-item group",
+              activeSubTab === "dashboard" && "active"
+            )}
+            data-active={activeSubTab === "dashboard"}
           >
-            <TrendingUp className="w-4 h-4" />
-            Control Center
+            <div className="flex items-center gap-3 min-w-0">
+              <TrendingUp className={cn("w-4 h-4 shrink-0 transition-colors nav-icon", activeSubTab === "dashboard" ? "text-blue-400" : "text-slate-400 group-hover:text-blue-400")} />
+              <span className="truncate">Control Center</span>
+            </div>
           </button>
 
           <button
             onClick={() => setActiveSubTab("properties")}
-            className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 text-xs font-black uppercase tracking-wider transition-all duration-200 ${
-              activeSubTab === "properties"
-                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
-                : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
-            }`}
+            className={cn(
+              "sidebar-nav-item group",
+              activeSubTab === "properties" && "active"
+            )}
+            data-active={activeSubTab === "properties"}
           >
-            <Building2 className="w-4 h-4" />
-            My Properties
+            <div className="flex items-center gap-3 min-w-0">
+              <Building2 className={cn("w-4 h-4 shrink-0 transition-colors nav-icon", activeSubTab === "properties" ? "text-blue-400" : "text-slate-400 group-hover:text-blue-400")} />
+              <span className="truncate">My Properties</span>
+            </div>
           </button>
 
           <button
             onClick={() => setActiveSubTab("payments")}
-            className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 justify-between text-xs font-black uppercase tracking-wider transition-all duration-200 ${
-              activeSubTab === "payments"
-                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
-                : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
-            }`}
+            className={cn(
+              "sidebar-nav-item group",
+              activeSubTab === "payments" && "active"
+            )}
+            data-active={activeSubTab === "payments"}
           >
-            <div className="flex items-center gap-3">
-              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-              Financial Ledger
+            <div className="flex items-center gap-3 min-w-0">
+              <FileSpreadsheet className={cn("w-4 h-4 shrink-0 transition-colors nav-icon", activeSubTab === "payments" ? "text-blue-400" : "text-emerald-400 group-hover:text-emerald-400")} />
+              <span className="truncate">Financial Ledger</span>
             </div>
             {propertyDelinquencies.length > 0 && (
-              <span className="bg-red-500 text-white rounded-full text-[9px] px-2 py-0.5 font-bold animate-pulse shadow-md">
+              <span className="bg-red-500 text-white rounded-full text-[9px] px-2 py-0.5 font-bold animate-pulse shadow-md shrink-0">
                 {propertyDelinquencies.length}
               </span>
             )}
@@ -522,26 +760,49 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
 
           <button
             onClick={() => setActiveSubTab("forms")}
-            className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 text-xs font-black uppercase tracking-wider transition-all duration-200 ${
-              activeSubTab === "forms"
-                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
-                : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
-            }`}
+            className={cn(
+              "sidebar-nav-item group",
+              activeSubTab === "forms" && "active"
+            )}
+            data-active={activeSubTab === "forms"}
           >
-            <FileText className="w-4 h-4" />
-            Forms & Document Hub
+            <div className="flex items-center gap-3 min-w-0">
+              <FileText className={cn("w-4 h-4 shrink-0 transition-colors nav-icon", activeSubTab === "forms" ? "text-blue-400" : "text-slate-400 group-hover:text-blue-400")} />
+              <span className="truncate">Forms & Document Hub</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab("queries")}
+            className={cn(
+              "sidebar-nav-item group",
+              activeSubTab === "queries" && "active"
+            )}
+            data-active={activeSubTab === "queries"}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <MessageSquare className={cn("w-4 h-4 shrink-0 transition-colors nav-icon", activeSubTab === "queries" ? "text-blue-400" : "text-slate-400 group-hover:text-blue-400")} />
+              <span className="truncate">Resident Inquiries & Help</span>
+            </div>
+            {residentQueries.filter(q => q.status === "Responded").length > 0 && (
+              <span className="bg-emerald-500 text-slate-950 rounded-full text-[9px] px-2 py-0.5 font-bold animate-pulse shadow-md shrink-0">
+                {residentQueries.filter(q => q.status === "Responded").length}
+              </span>
+            )}
           </button>
 
           <button
             onClick={() => setActiveSubTab("notices")}
-            className={`w-full h-10 px-4 rounded-xl flex items-center gap-3 text-xs font-black uppercase tracking-wider transition-all duration-200 ${
-              activeSubTab === "notices"
-                ? "bg-blue-600/15 border border-blue-500/20 text-blue-300 shadow-inner"
-                : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
-            }`}
+            className={cn(
+              "sidebar-nav-item group",
+              activeSubTab === "notices" && "active"
+            )}
+            data-active={activeSubTab === "notices"}
           >
-            <Bell className="w-4 h-4" />
-            Notices & Promos
+            <div className="flex items-center gap-3 min-w-0">
+              <Bell className={cn("w-4 h-4 shrink-0 transition-colors nav-icon", activeSubTab === "notices" ? "text-blue-400" : "text-slate-400 group-hover:text-amber-400")} />
+              <span className="truncate">Notices & Promos</span>
+            </div>
           </button>
         </nav>
 
@@ -590,6 +851,40 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
           {/* 1. CONTROL CENTER / DASHBOARD */}
           {activeSubTab === "dashboard" && (
             <div className="space-y-6 animate-in fade-in duration-300">
+
+              {/* ARCHIVED PROPERTY NOTIFICATION BANNER */}
+              {archivedNotices.length > 0 && (
+                <div className="bg-amber-950/40 border border-amber-500/40 rounded-3xl p-6 space-y-3 mb-6 animate-in fade-in">
+                  <div className="flex items-center gap-3 text-amber-400">
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                    <div>
+                      <h3 className="font-black text-sm uppercase tracking-wider">
+                        Notice: Registered Real Property Record Archived / Reassessed
+                      </h3>
+                      <p className="text-xs text-amber-200/80">
+                        The Municipal Assessor / Treasury has updated property registration status. Official remarks recorded below:
+                      </p>
+                    </div>
+                  </div>
+                  {archivedNotices.map((notice, idx) => (
+                    <div key={idx} className="p-4 bg-slate-950/90 border border-amber-500/20 rounded-2xl space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-white font-mono text-sm">Tax Dec No: {notice.tdNumber}</span>
+                        <span className="text-[10px] bg-amber-500/20 text-amber-300 font-mono px-2.5 py-0.5 rounded-full border border-amber-500/30 font-bold uppercase">
+                          ARCHIVED RECORD
+                        </span>
+                      </div>
+                      <p className="text-amber-200 font-medium">
+                        <strong className="text-amber-400 font-bold">Remarks / Reason:</strong> "{notice.reason || 'Property archived due to re-assessment or record adjustment.'}"
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        Archived On: {notice.archivedAt ? new Date(notice.archivedAt).toLocaleString() : new Date().toLocaleDateString()} by {notice.archivedBy || 'Municipal Assessor'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* TOP KPI BLOCK */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-800 relative overflow-hidden flex items-center justify-between">
@@ -1099,6 +1394,27 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                           <option key={p.id} value={p.id}>{p.tdNumber} - {p.barangay} ({p.classification})</option>
                         ))}
                       </select>
+
+                      {selectedPropIdForForm && formType === "clearance" && (() => {
+                        const selProp = properties.find(p => p.id === selectedPropIdForForm);
+                        const selUnpaid = delinquencies.filter(
+                          d => (d.propertyId === selectedPropIdForForm || (selProp && (d as any).propertyTdn === selProp.tdNumber)) && d.status !== "Paid" && d.status !== "Voided"
+                        );
+                        if (selUnpaid.length > 0) {
+                          return (
+                            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl space-y-1 text-xs text-red-300">
+                              <div className="flex items-center gap-2 font-bold text-red-400">
+                                <AlertTriangle className="w-4 h-4 shrink-0" />
+                                <span>Notice: Selected TDN has outstanding tax delinquencies</span>
+                              </div>
+                              <p className="text-[11px] text-red-200/90 leading-relaxed font-normal">
+                                TDN {selProp?.tdNumber} currently has {selUnpaid.length} unpaid delinquency record(s) in the treasury ledger. A Tax Clearance Certificate cannot be officially approved until all tax liabilities are settled.
+                              </p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
 
                     {/* DIGITAL CLEARANCE FIELDS */}
@@ -1247,7 +1563,15 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                               </span>
                             </div>
                             <p className="text-[11px] font-bold text-slate-300">TDN: {r.propertyTdn}</p>
-                            <p className="text-[9px] text-slate-500">Filed: {new Date(r.createdAt).toLocaleDateString()}</p>
+                            <p className="text-[9px] text-slate-500">
+                              Filed: {r.createdAt ? (isNaN(new Date(r.createdAt).getTime()) ? "Recently" : new Date(r.createdAt).toLocaleDateString()) : "Recently"}
+                            </p>
+                            {r.adminNotes && (
+                              <div className="p-2 bg-blue-950/40 border border-blue-800/40 rounded-xl text-[10px] text-blue-200 mt-1">
+                                <span className="font-bold text-blue-400">Admin Remarks: </span>
+                                {r.adminNotes}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1259,6 +1583,247 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                       Note: Document requests are generally processed within 1-2 working days by Treasury officers. You will receive an status update in this dashboard when clearance logs are cleared.
                     </p>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 4. RESIDENT INQUIRIES & HELPDESK SECTION */}
+          {activeSubTab === "queries" && (
+            <div className="space-y-6 max-w-6xl mx-auto animate-in fade-in duration-300">
+              <div className="bg-slate-900/40 rounded-3xl border border-slate-800 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Municipal Helpdesk & Inquiry Channel</span>
+                  </div>
+                  <h2 className="text-xl font-black text-white">Resident Query & Support Desk</h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Directly message municipal administrators for real property tax assessments, payment verifications, and property claims.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                {/* SUBMIT NEW QUERY FORM (5 Cols) */}
+                <div className="lg:col-span-5 bg-slate-900/60 rounded-3xl border border-slate-800 p-6 space-y-6">
+                  <div>
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2 mb-1">
+                      <Send className="w-4 h-4 text-blue-400" />
+                      Submit New Resident Inquiry
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Submit your question or issue to official Dipaculao Treasury & Assessment officers.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleCreateQuery} className="space-y-4">
+                    {/* CATEGORY SELECT */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                        Inquiry Category
+                      </label>
+                      <select
+                        value={newQueryCategory}
+                        onChange={(e) => setNewQueryCategory(e.target.value as QueryCategory)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-slate-200 focus:border-blue-500 outline-none cursor-pointer"
+                      >
+                        <option value="Tax Assessment">Tax Assessment & Assessment Value</option>
+                        <option value="Payment Verification">Payment Verification & Receipt Issue</option>
+                        <option value="Property Claim">Property Claim & Account Linking</option>
+                        <option value="Penalty Appeal">Penalty Appeal & Discount Eligibility</option>
+                        <option value="Ownership Transfer">Ownership Transfer & Revision</option>
+                        <option value="General Inquiry">General Municipal Inquiry</option>
+                      </select>
+                    </div>
+
+                    {/* PROPERTY REFERENCE SELECT */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                        Linked Property TDN (Optional)
+                      </label>
+                      <select
+                        value={newQueryPropTdn}
+                        onChange={(e) => setNewQueryPropTdn(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-slate-200 focus:border-blue-500 outline-none cursor-pointer"
+                      >
+                        <option value="">No Specific Property Selected</option>
+                        {properties.map((p) => (
+                          <option key={p.id} value={p.tdNumber}>
+                            TDN: {p.tdNumber} ({p.barangay})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* SUBJECT INPUT */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                        Subject / Topic Title
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g., Clarification on 2026 Prompt Payment Discount"
+                        value={newQuerySubject}
+                        onChange={(e) => setNewQuerySubject(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-xs text-white focus:border-blue-500 outline-none"
+                      />
+                    </div>
+
+                    {/* MESSAGE TEXTAREA */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                        Inquiry Message Details
+                      </label>
+                      <textarea
+                        rows={4}
+                        required
+                        placeholder="Provide full details of your query so administrators can assist you efficiently..."
+                        value={newQueryMessage}
+                        onChange={(e) => setNewQueryMessage(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-3 text-xs text-white focus:border-blue-500 outline-none leading-relaxed"
+                      />
+                    </div>
+
+                    {queryErrorMsg && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 font-semibold flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>{queryErrorMsg}</span>
+                      </div>
+                    )}
+
+                    {querySuccessMsg && (
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 font-semibold flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>{querySuccessMsg}</span>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={isSubmittingQuery}
+                      className="w-full bg-blue-600 hover:bg-blue-500 font-bold uppercase tracking-widest text-xs text-white h-11 rounded-xl flex items-center justify-center gap-2 transition-transform active:scale-[0.98] disabled:opacity-50 cursor-pointer shadow-lg shadow-blue-500/20"
+                    >
+                      <Send className="w-4 h-4" />
+                      {isSubmittingQuery ? "Sending Inquiry..." : "Submit Inquiry to Administrators"}
+                    </button>
+                  </form>
+                </div>
+
+                {/* MY SUBMITTED INQUIRIES LIST (7 Cols) */}
+                <div className="lg:col-span-7 bg-slate-900/60 rounded-3xl border border-slate-800 p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+                    <div>
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                        <MessageCircle className="w-4 h-4 text-emerald-400" />
+                        My Submitted Inquiries & Responses
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Real-time conversation history with Dipaculao municipal administrators.
+                      </p>
+                    </div>
+
+                    <span className="text-[10px] font-bold bg-slate-950 border border-slate-800 px-3 py-1 rounded-full text-slate-400">
+                      {residentQueries.length} Tickets
+                    </span>
+                  </div>
+
+                  {residentQueries.length === 0 ? (
+                    <div className="p-8 text-center text-slate-600 italic text-xs">
+                      No inquiries submitted yet. Use the form on the left to message municipal officers.
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+                      {residentQueries.map((q) => {
+                        const isResponded = q.status === "Responded";
+                        const isResolved = q.status === "Resolved";
+                        const hasReplies = (q.replies && q.replies.length > 0) || q.adminResponse;
+
+                        return (
+                          <div
+                            key={q.id}
+                            className={`p-4 rounded-2xl border transition-colors space-y-3 ${
+                              isResponded
+                                ? "bg-slate-950 border-emerald-500/30 hover:border-emerald-500/50"
+                                : isResolved
+                                ? "bg-slate-950/60 border-slate-800"
+                                : "bg-slate-950/80 border-slate-800/80 hover:border-slate-700"
+                            }`}
+                          >
+                            {/* TOP BADGES */}
+                            <div className="flex items-center justify-between text-[10px]">
+                              <span className="bg-blue-600/15 border border-blue-500/25 text-blue-400 rounded-full px-2.5 py-0.5 font-bold uppercase tracking-wide">
+                                {q.category}
+                              </span>
+                              <span
+                                className={`px-2.5 py-0.5 font-black uppercase text-[8px] rounded-full tracking-wider border ${
+                                  q.status === "Responded"
+                                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 animate-pulse"
+                                    : q.status === "Resolved"
+                                    ? "bg-slate-800 border-slate-700 text-slate-400"
+                                    : q.status === "In Review"
+                                    ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                                    : "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                                }`}
+                              >
+                                {q.status}
+                              </span>
+                            </div>
+
+                            <div>
+                              <h4 className="text-xs font-black text-white">{q.subject}</h4>
+                              {q.propertyTdn && (
+                                <p className="text-[10px] text-blue-400 font-semibold mt-0.5">
+                                  Linked TDN: {q.propertyTdn}
+                                </p>
+                              )}
+                              <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                                {q.message}
+                              </p>
+                              <p className="text-[9px] text-slate-500 mt-1 font-mono">
+                                Filed: {new Date(q.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+
+                            {/* OFFICIAL ADMIN RESPONSE CALLOUT BOX */}
+                            {q.adminResponse && (
+                              <div className="p-3 bg-blue-950/40 border border-blue-800/50 rounded-xl space-y-1 mt-2">
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <span className="font-bold text-blue-300 flex items-center gap-1">
+                                    <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                                    Official Municipal Response ({q.respondedBy || "Administrator"})
+                                  </span>
+                                  {q.respondedAt && (
+                                    <span className="text-[9px] text-slate-400">
+                                      {new Date(q.respondedAt).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-blue-100 leading-relaxed font-medium">
+                                  {q.adminResponse}
+                                </p>
+                              </div>
+                            )}
+
+                            {/* THREAD ACTION BUTTON */}
+                            <div className="flex items-center justify-between border-t border-slate-800/60 pt-2.5 mt-2">
+                              <span className="text-[10px] text-slate-500 font-semibold">
+                                {hasReplies ? `${(q.replies?.length || 0) + (q.adminResponse ? 1 : 0)} replies in thread` : "Awaiting review"}
+                              </span>
+                              <button
+                                onClick={() => setActiveQueryThread(q)}
+                                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 text-[10px] font-bold rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <span>View Conversation Thread</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1498,7 +2063,16 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                   </div>
 
                   {/* PRINT & DISMISS */}
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDownloadReceiptPDF}
+                      disabled={isSavingReceiptPdf}
+                      className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                    >
+                      <Download className="w-4 h-4" />
+                      {isSavingReceiptPdf ? "Generating..." : "Download PDF"}
+                    </button>
                     <button
                       type="button"
                       onClick={handlePrintReceipt}
@@ -1513,7 +2087,7 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
                         setIsPayModalOpen(false);
                         setActiveSubTab("dashboard");
                       }}
-                      className="flex-1 py-3 bg-white hover:bg-slate-100 text-slate-950 rounded-xl text-xs font-black uppercase tracking-widest text-center cursor-pointer"
+                      className="py-3 px-5 bg-white hover:bg-slate-100 text-slate-950 rounded-xl text-xs font-black uppercase tracking-widest text-center cursor-pointer"
                     >
                       Done
                     </button>
@@ -1524,6 +2098,134 @@ export default function TaxpayerPortal({ profile, logout, isOffline }: TaxpayerP
           </div>
         )}
       </AnimatePresence>
+
+      {/* RESIDENT CONVERSATION THREAD MODAL */}
+      {activeQueryThread && (
+        <div className="fixed inset-0 z-[160] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative my-8 max-h-[88vh] overflow-y-auto">
+            {/* HEADER */}
+            <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 rounded-full">
+                    {activeQueryThread.category}
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-500">
+                    Status: {activeQueryThread.status}
+                  </span>
+                </div>
+                <h3 className="text-base font-black text-white">{activeQueryThread.subject}</h3>
+                {activeQueryThread.propertyTdn && (
+                  <p className="text-xs text-blue-400 font-bold mt-0.5">
+                    Property TDN: {activeQueryThread.propertyTdn}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setActiveQueryThread(null)}
+                className="p-2 text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* INITIAL RESIDENT INQUIRY MESSAGE */}
+            <div className="p-4 bg-slate-950/90 border border-slate-800 rounded-2xl space-y-1 text-xs">
+              <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                <span className="font-bold text-slate-400">My Original Inquiry</span>
+                <span>{new Date(activeQueryThread.createdAt).toLocaleString()}</span>
+              </div>
+              <p className="text-slate-200 leading-relaxed font-medium whitespace-pre-wrap">
+                {activeQueryThread.message}
+              </p>
+            </div>
+
+            {/* OFFICIAL ADMIN RESPONSE IF AVAILABLE */}
+            {activeQueryThread.adminResponse && (
+              <div className="p-4 bg-blue-950/50 border border-blue-800/60 rounded-2xl space-y-2 text-xs">
+                <div className="flex items-center justify-between text-[10px] border-b border-blue-800/40 pb-2">
+                  <span className="font-black text-blue-300 flex items-center gap-1.5 uppercase tracking-wider">
+                    <ShieldCheck className="w-4 h-4 text-blue-400" />
+                    Official Response from {activeQueryThread.respondedBy || "Municipal Administrator"}
+                  </span>
+                  {activeQueryThread.respondedAt && (
+                    <span className="text-slate-400">
+                      {new Date(activeQueryThread.respondedAt).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+                <p className="text-blue-100 leading-relaxed font-medium whitespace-pre-wrap">
+                  {activeQueryThread.adminResponse}
+                </p>
+              </div>
+            )}
+
+            {/* REPLIES HISTORY */}
+            {activeQueryThread.replies && activeQueryThread.replies.length > 0 && (
+              <div className="space-y-3 pt-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                  Follow-Up Messages ({activeQueryThread.replies.length})
+                </span>
+                <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+                  {activeQueryThread.replies.map((reply) => {
+                    const isAdmin = reply.senderRole === "Admin" || reply.senderRole === "Encoder";
+                    return (
+                      <div
+                        key={reply.id}
+                        className={`p-3.5 rounded-2xl border text-xs space-y-1 ${
+                          isAdmin
+                            ? "bg-blue-950/40 border-blue-800/50 text-blue-100 ml-4"
+                            : "bg-slate-950 border-slate-800 text-slate-200 mr-4"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <span className={`font-bold ${isAdmin ? "text-blue-400" : "text-slate-300"}`}>
+                            {reply.senderName} ({reply.senderRole})
+                          </span>
+                          <span>{new Date(reply.createdAt).toLocaleString()}</span>
+                        </div>
+                        <p className="leading-relaxed whitespace-pre-wrap mt-1">{reply.message}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* FOLLOW-UP REPLY FORM */}
+            <form onSubmit={handleSendResidentReply} className="space-y-3 pt-2 border-t border-slate-800">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-300 block">
+                Send Follow-up Message to Administrator
+              </label>
+              <textarea
+                rows={3}
+                required
+                placeholder="Write a follow-up question or clarification..."
+                value={replyMessage}
+                onChange={(e) => setReplyMessage(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors leading-relaxed"
+              />
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveQueryThread(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingReply}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl flex items-center gap-2 transition-transform active:scale-95 disabled:opacity-50 cursor-pointer shadow-lg shadow-blue-500/20"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{isSubmittingReply ? "Sending..." : "Send Reply"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -116,10 +116,16 @@ const AuditLogView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-2xl font-bold text-white tracking-tight">Audit Trail</h2>
-          <p className="text-slate-400 text-sm">Immutable history of system activity and record modifications.</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-sm">
+        <div>
+          <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+            <Shield className="w-4 h-4" />
+            <span>System Security & Oversight</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">System Audit Trail</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Immutable log of municipal system activity, user security events, and database record modifications.
+          </p>
         </div>
         
         <div className="flex flex-col md:flex-row gap-2 items-center bg-slate-900/50 p-2 rounded-xl border border-slate-800">

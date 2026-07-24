@@ -19,7 +19,7 @@ import {
   ResponsiveContainer,
   Cell
 } from "recharts";
-import { TrendingUp, Users, AlertCircle, CheckCircle2 } from "lucide-react";
+import { TrendingUp, Users, AlertCircle, CheckCircle2, LayoutDashboard } from "lucide-react";
 import { motion } from "motion/react";
 import { useAuth } from "../AuthContext";
 import { TaxCalculator } from "./TaxCalculator";
@@ -82,9 +82,9 @@ const Dashboard: React.FC = () => {
 
       if (!isPaid) {
         acc.delinquentProps.add(curr.propertyId);
-        // Receivables = Full Assessed Value (Basic Tax Due / 0.01)
-        const assessedValue = curr.basicTaxDue / 0.01;
-        acc.totalAmountDue += assessedValue;
+        // Receivables = Total unpaid tax/delinquency due
+        const totalDue = curr.totalDue !== undefined ? curr.totalDue : ((curr as any).total !== undefined ? (curr as any).total : 0);
+        acc.totalAmountDue += totalDue;
       } else {
         acc.paidProps.add(curr.propertyId);
       }
@@ -97,8 +97,8 @@ const Dashboard: React.FC = () => {
 
       if (!isPaid) {
         const year = curr.year?.toString() || "Unknown";
-        const assessedValue = (curr.basicTaxDue || 0) / 0.01;
-        acc[year] = (acc[year] || 0) + assessedValue;
+        const totalDue = curr.totalDue !== undefined ? curr.totalDue : ((curr as any).total !== undefined ? (curr as any).total : 0);
+        acc[year] = (acc[year] || 0) + totalDue;
       }
       return acc;
     }, {});
@@ -126,18 +126,23 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <div className="mb-4">
-        <h1 className="text-3xl font-black text-white tracking-tight">Welcome, {firstName}!</h1>
-      </div>
-      <div className="flex items-end justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-sm">
         <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">Executive Control</h2>
-          <p className="text-slate-500 text-sm mt-1">Real-time financial status across all property jurisdictions.</p>
+          <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+            <LayoutDashboard className="w-4 h-4" />
+            <span>Executive Control & Municipal Overview</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">Welcome, {firstName}!</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Real-time financial status across all property jurisdictions.
+          </p>
         </div>
-        <div className="text-right">
-          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Status Code</p>
-          <div className="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-[10px] font-mono text-blue-400">
-            HEALTH_OPTIMAL_V2
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status Code</p>
+            <div className="px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-[10px] font-mono font-bold text-blue-400">
+              HEALTH_OPTIMAL_V2
+            </div>
           </div>
         </div>
       </div>

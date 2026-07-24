@@ -1,21 +1,24 @@
-import { db, auth, collection, addDoc, serverTimestamp } from "./firebase";
+import { supabase } from "./supabase";
 import { AuditAction } from "../types";
 
 export async function logAudit(action: AuditAction, entityType: string, entityId: string, oldValue?: any, newValue?: any) {
   try {
-    const user = auth.currentUser;
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return;
 
-    await addDoc(collection(db, "audit_logs"), {
+    const { error } = await supabase.from("audit_logs").insert({
       action,
-      entityType,
-      entityId,
-      oldValue: oldValue || null,
-      newValue: newValue || null,
-      userId: user.uid,
-      userEmail: user.email,
-      timestamp: serverTimestamp()
+      entity_type: entityType,
+      entity_id: entityId,
+      old_value: oldValue || null,
+      new_value: newValue || null,
+      user_id: user.id,
+      user_email: user.email || "",
+      timestamp: new Date().toISOString()
     });
+
+    if (error) throw error;
   } catch (error) {
     console.error("Failed to log audit:", error);
   }

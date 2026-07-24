@@ -7,9 +7,9 @@ import {
   query, 
   where, 
   limit, 
-  serverTimestamp 
-} from "firebase/firestore";
-import { db } from "./firebase";
+  serverTimestamp,
+  db
+} from "./firebase";
 import { logAudit } from "./audit";
 
 export type OfflineTaskType = 'RECORD_PAYMENT' | 'CREATE_PROPERTY' | 'UPDATE_PROPERTY';
@@ -62,6 +62,19 @@ export function addToOfflineQueue(type: OfflineTaskType, data: any, description:
   queue.push(newTask);
   saveOfflineQueue(queue);
   return newTask;
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("rpt-add-offline-task", (e: any) => {
+    if (e.detail) {
+      const { type, data, description } = e.detail;
+      // Avoid duplicate tasks with the exact same ID
+      const queue = getOfflineQueue();
+      if (!queue.some(t => t.data?.id === data?.id)) {
+        addToOfflineQueue(type as OfflineTaskType, data, description);
+      }
+    }
+  });
 }
 
 // Helper to remove from queue

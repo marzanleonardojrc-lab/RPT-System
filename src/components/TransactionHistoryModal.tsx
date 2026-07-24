@@ -3,9 +3,9 @@ import {
   collection, 
   query, 
   where, 
-  onSnapshot 
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
+  onSnapshot,
+  db
+} from "../lib/firebase";
 import { Property, Payment } from "../types";
 import { formatCurrency, cn } from "../lib/utils";
 import { 

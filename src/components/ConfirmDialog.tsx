@@ -5,12 +5,16 @@ import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 interface ConfirmDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (reason?: string) => void;
   title: string;
   message: string;
   type?: "danger" | "warning" | "info" | "success";
   confirmText?: string;
   cancelText?: string;
+  showInput?: boolean;
+  inputPlaceholder?: string;
+  inputLabel?: string;
+  requiredInput?: boolean;
 }
 
 const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
@@ -21,13 +25,26 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   message,
   type = "warning",
   confirmText = "Confirm Action",
-  cancelText = "Cancel"
+  cancelText = "Cancel",
+  showInput = false,
+  inputPlaceholder = "Enter official reason or remarks...",
+  inputLabel = "Reason / Remarks (Required for Audit)",
+  requiredInput = false
 }) => {
+  const [reasonInput, setReasonInput] = React.useState("");
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setReasonInput("");
+    }
+  }, [isOpen]);
+
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isOpen && e.key === "Enter") {
+      if (isOpen && e.key === "Enter" && !e.shiftKey) {
+        if (showInput && requiredInput && !reasonInput.trim()) return;
         e.preventDefault();
-        onConfirm();
+        onConfirm(reasonInput.trim());
         onClose();
       }
     };
@@ -35,7 +52,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       window.addEventListener("keydown", handleKeyDown);
     }
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onConfirm, onClose]);
+  }, [isOpen, onConfirm, onClose, showInput, requiredInput, reasonInput]);
 
   const getIcon = () => {
     switch (type) {
@@ -77,21 +94,46 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 {getIcon()}
               </div>
               <h3 className="text-xl font-bold text-white mb-2">{title}</h3>
-              <p className="text-sm text-slate-400 mb-8 whitespace-pre-wrap">{message}</p>
+              <p className="text-sm text-slate-400 mb-6 whitespace-pre-wrap">{message}</p>
+
+              {showInput && (
+                <div className="w-full text-left space-y-2 mb-6">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                    {inputLabel} {requiredInput && <span className="text-red-400">*</span>}
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={reasonInput}
+                    onChange={(e) => setReasonInput(e.target.value)}
+                    placeholder={inputPlaceholder}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-3 text-xs text-white placeholder-slate-600 focus:border-red-500 focus:ring-1 focus:ring-red-500/50 outline-none resize-none leading-relaxed"
+                    autoFocus
+                  />
+                  {requiredInput && !reasonInput.trim() && (
+                    <p className="text-[10px] text-amber-400 font-semibold italic">
+                      * Official remarks/reason are required before confirming this action.
+                    </p>
+                  )}
+                </div>
+              )}
               
               <div className="flex gap-3 w-full">
                 <button
+                  type="button"
                   onClick={onClose}
-                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold transition-all border border-slate-700"
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold transition-all border border-slate-700 cursor-pointer"
                 >
                   {cancelText}
                 </button>
                 <button
+                  type="button"
+                  disabled={showInput && requiredInput && !reasonInput.trim()}
                   onClick={() => {
-                    onConfirm();
+                    if (showInput && requiredInput && !reasonInput.trim()) return;
+                    onConfirm(reasonInput.trim());
                     onClose();
                   }}
-                  className={`flex-1 py-3 text-white rounded-xl text-sm font-bold transition-all shadow-lg ${getColors()}`}
+                  className={`flex-1 py-3 text-white rounded-xl text-sm font-bold transition-all shadow-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${getColors()}`}
                 >
                   {confirmText}
                 </button>

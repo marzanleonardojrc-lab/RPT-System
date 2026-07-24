@@ -398,9 +398,9 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean, onPostPa
       group.maxYear = Math.max(group.maxYear, d.year);
     });
 
-    // Sort delinquencies within groups by year desc
+    // Sort delinquencies within groups by year asc (latest year below)
     Object.values(groups).forEach(g => {
-      g.delinquencies.sort((a, b) => b.year - a.year);
+      g.delinquencies.sort((a, b) => a.year - b.year);
     });
 
     return Object.values(groups).sort((a, b) => a.property.ownerName.localeCompare(b.property.ownerName));
@@ -516,15 +516,21 @@ const DelinquencyList: React.FC<{ isEncoder: boolean, isAdmin: boolean, onPostPa
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-sm">
         <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">Delinquency Ledger</h2>
-          <p className="text-slate-500 text-sm mt-1">Real-time monitoring of outstanding tax assets and liabilities.</p>
+          <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">
+            <AlertCircle className="w-4 h-4" />
+            <span>Delinquency & Enforcement</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">Delinquency Ledger</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Real-time monitoring of outstanding tax assets, penalties, and enforcement notices.
+          </p>
         </div>
         {isEncoder && (
           <button 
             onClick={() => setIsAdding(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-500 transition shadow-lg shadow-red-600/20 font-bold text-xs uppercase tracking-wider"
+            className="flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-2xl hover:bg-red-500 transition shadow-lg shadow-red-600/20 font-bold text-xs uppercase tracking-wider shrink-0"
           >
             <Plus className="w-4 h-4" />
             Issue Delinquency
